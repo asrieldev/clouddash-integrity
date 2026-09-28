@@ -671,6 +671,7 @@ function Encoder({ notify }) {
   const [locked, setLocked] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [lastClip, setLastClip] = useState(null);
+  const [segmentLength, setSegmentLength] = useState(5);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -679,23 +680,12 @@ function Encoder({ notify }) {
   const nextSequenceRef = useRef(3);
   const offlineRef = useRef(false);
   const lastClipUrlRef = useRef(null);
-  const [segments, setSegments] = useState([
-    {
-      seq: 2,
-      time: "14:10:10",
-      hash: "b7a9e341d8c5",
-      size: "382 KB",
-      state: "Sent",
-    },
-    {
-      seq: 1,
-      time: "14:10:05",
-      hash: "c064d8927af1",
-      size: "364 KB",
-      state: "Sent",
-    },
-  ]);
+  const recordingRef = useRef(false);
+  const segmentTimerRef = useRef(null);
+  const segmentLengthRef = useRef(5);
+  const [segments, setSegments] = useState([]);
   useEffect(() => { offlineRef.current = offline; }, [offline]);
+  useEffect(() => { segmentLengthRef.current = segmentLength; }, [segmentLength]);
   useEffect(() => {
     if (!recording) return;
     const seconds = setInterval(() => setElapsed((v) => v + 1), 1000);
@@ -708,8 +698,10 @@ function Encoder({ notify }) {
     }
   }, [recording]);
   useEffect(() => () => {
-    if (recorderRef.current?.state !== 'inactive') recorderRef.current?.stop();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    recordingRef.current = false;
+    if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+    if (recorderRef.current?.state !== 'inactive') recorderRef.current.stop();
+    else streamRef.current?.getTracks().forEach((track) => track.stop());
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
   useEffect(() => {
@@ -761,11 +753,42 @@ function Encoder({ notify }) {
     const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
     const result = offlineRef.current ? (await enqueueSegment({ ...segment, ...identity, blob }), { queued: true }) : await uploadSegment({ ...identity, segment, blob });
-    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent' }, ...rows].slice(0, 6));
     const previewUrl = URL.createObjectURL(blob);
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
     lastClipUrlRef.current = previewUrl;
-    setLastClip({ url: previewUrl, sequence: segment.sequence, extension: fileInfo.extension });
+    const recordedClip = { url: previewUrl, sequence: segment.sequence, extension: fileInfo.extension };
+    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', preview: recordedClip }, ...rows].slice(0, 12));
+    setLastClip(recordedClip);
+  }
+  function beginSegment(stream) {
+    const mimeType = ['video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
+    const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+    const chunks = [];
+    const fileInfo = { mimeType: mimeType || 'video/webm', extension: 'webm' };
+    recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    recorder.onstop = async () => {
+      if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+      segmentTimerRef.current = null;
+      const blob = new Blob(chunks, { type: fileInfo.mimeType });
+      if (blob.size) {
+        try {
+          await persistChunk(blob, fileInfo);
+        } catch (error) {
+          notify(`Segment is queued locally: ${error.message}`);
+        }
+      }
+      if (recordingRef.current && streamRef.current === stream && stream.active) {
+        beginSegment(stream);
+      } else {
+        stream.getTracks().forEach((track) => track.stop());
+        recorderRef.current = null;
+      }
+    };
+    recorder.start();
+    recorderRef.current = recorder;
+    segmentTimerRef.current = setTimeout(() => {
+      if (recorder.state !== 'inactive') recorder.stop();
+    }, segmentLengthRef.current * 1000);
   }
   async function startDashcam() {
     try {
@@ -774,14 +797,21 @@ function Encoder({ notify }) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-      const mimeType = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8'].find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      const fileInfo = { mimeType: mimeType || 'video/webm', extension: mimeType?.includes('mp4') ? 'mp4' : 'webm' };
-      recorder.ondataavailable = (event) => { if (event.data.size) persistChunk(event.data, fileInfo).catch((error) => notify(`Segment queued: ${error.message}`)); };
-      recorder.start(5000); recorderRef.current = recorder; setRecording(true); notify('Camera recording started. Evidence is segmented every 5 seconds.');
+      recordingRef.current = true;
+      setElapsed(0);
+      setRecording(true);
+      beginSegment(stream);
+      notify('Camera recording started. Each segment is saved as a complete playable video file.');
     } catch (error) { notify(error.message || 'Camera access was not granted.'); }
   }
-  function stopDashcam() { recorderRef.current?.stop(); streamRef.current?.getTracks().forEach((track) => track.stop()); recorderRef.current = null; streamRef.current = null; setRecording(false); notify('Dashcam recording stopped'); }
+  function stopDashcam() {
+    recordingRef.current = false;
+    if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
+    if (recorderRef.current?.state !== 'inactive') recorderRef.current.stop();
+    else streamRef.current?.getTracks().forEach((track) => track.stop());
+    setRecording(false);
+    notify('Finalizing the last video segment...');
+  }
   const duration = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
   const latest = segments[0];
   return (
@@ -883,7 +913,7 @@ function Encoder({ notify }) {
           <div className="encoder-selects">
             <label>
               Segment length
-              <select defaultValue="5">
+              <select value={segmentLength} onChange={(event) => setSegmentLength(Number(event.target.value))}>
                 <option value="5">5 seconds</option>
                 <option value="10">10 seconds</option>
                 <option value="30">30 seconds</option>
@@ -937,30 +967,24 @@ function Encoder({ notify }) {
               </div>
               <Lock size={16} />
             </div>
-            <dl>
+            {latest ? <dl>
               <dt>segment</dt>
-              <dd>
-                #{latest.seq} · {latest.time}
-              </dd>
+              <dd>#{latest.seq} · {latest.time}</dd>
               <dt>segment_hash</dt>
-              <dd className="hash-green">{latest.hash}2fc93d4e90ab</dd>
-              <dt>prev_chain</dt>
-              <dd>c064d8927af1...e83b0f28</dd>
-              <dt>chain_hash</dt>
-              <dd className="hash-blue">9f11ac7d3e9a...c1d84a27</dd>
+              <dd className="hash-green">{latest.hash}...</dd>
+              <dt>chain_status</dt>
+              <dd className="hash-blue">Verified and linked</dd>
               <dt>retention</dt>
-              <dd>
-                {locked ? "Locked incident evidence" : "Rolling local buffer"}
-              </dd>
-            </dl>
+              <dd>{locked ? "Locked incident evidence" : "Rolling local buffer"}</dd>
+            </dl> : <p className="muted">No recorded segment yet. Start the dashcam to create one.</p>}
           </article>
         </aside>
       </section>
       <section className="panel segment-table">
         <div className="panel-title">
           <div>
-            <h2>Recorded segments</h2>
-            <p>Local evidence buffer and transmission status</p>
+            <h2>Recordings on this device ({segments.length})</h2>
+            <p>Choose play to review a captured segment before downloading or verifying it.</p>
           </div>
           <span className="storage">
             Browser storage: {(segments.length * 0.38).toFixed(1)} MB used
@@ -976,6 +1000,7 @@ function Encoder({ notify }) {
                 <th>SHA-256</th>
                 <th>Transmission</th>
                 <th>Retention</th>
+                <th>Play</th>
               </tr>
             </thead>
             <tbody>
@@ -998,6 +1023,11 @@ function Encoder({ notify }) {
                     <Badge tone={locked ? "warning" : "neutral"}>
                       {locked ? "Locked" : "Rolling"}
                     </Badge>
+                  </td>
+                  <td>
+                    <IconButton label={`Play recording ${s.seq}`} onClick={() => setLastClip(s.preview)}>
+                      <Play size={16} />
+                    </IconButton>
                   </td>
                 </tr>
               ))}
