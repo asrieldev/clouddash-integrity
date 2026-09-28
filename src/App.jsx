@@ -484,8 +484,8 @@ function Evidence({ videos, setVideos, notify }) {
   return (
     <div className="page">
       <SectionHead
-        title="Video evidence"
-        copy="Securely ingest, inspect, and verify dashcam evidence."
+        title="Verify evidence"
+        copy="Load a submitted recording or add a local clip to inspect its integrity record."
         action={
           <label className="button primary">
             <HardDriveUpload size={17} />
@@ -504,8 +504,8 @@ function Evidence({ videos, setVideos, notify }) {
           <article className="panel upload-zone">
             <HardDriveUpload size={25} />
             <div>
-              <b>Drop an MP4, MOV, or MKV file here</b>
-              <p>Encrypted in transit. Maximum file size: 5 GB.</p>
+              <b>Add an evidence clip</b>
+              <p>MP4, MOV, and WebM files are supported.</p>
             </div>
             <label className="button secondary">
               Browse files
@@ -530,7 +530,7 @@ function Evidence({ videos, setVideos, notify }) {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search by filename or evidence ID"
+                  placeholder="Search evidence ID or filename"
                 />
               </div>
               <button className="button secondary">
@@ -545,18 +545,6 @@ function Evidence({ videos, setVideos, notify }) {
           </article>
         </div>
         <aside className="detail panel">
-          <div className="preview">
-            <div className="road">
-              <span />
-              <span />
-              <span />
-            </div>
-            <div className="hud">CAM 07 · 14:12:03</div>
-            <div className="preview-center">
-              <Play size={22} />
-            </div>
-            <div className="preview-label">Evidence preview</div>
-          </div>
           <div className="detail-head">
             <div>
               <h2>{selected.name}</h2>
@@ -567,35 +555,25 @@ function Evidence({ videos, setVideos, notify }) {
             <Badge tone={selected.severity}>{selected.severity}</Badge>
           </div>
           <div className="detail-block">
-            <h3>Integrity verification</h3>
+            <h3>Integrity result</h3>
             <div className="verify">
               <ShieldCheck size={20} />
               <div>
                 <b>{selected.integrity}</b>
-                <small>SHA-256 fingerprint recorded</small>
+                <small>Fingerprint is stored with this evidence record.</small>
               </div>
             </div>
-            <code>{selected.hash}</code>
+            <code className="evidence-hash">{selected.hash}</code>
           </div>
           <div className="detail-block">
-            <h3>AI scene analysis</h3>
-            <div className="tag-row">
-              {selected.tags.map((t) => (
-                <span key={t}>{t}</span>
-              ))}
-            </div>
-            <div className="confidence">
-              <span>Detection confidence</span>
-              <b>{selected.confidence}%</b>
-              <div>
-                <i style={{ width: `${selected.confidence}%` }} />
-              </div>
-            </div>
+            <h3>Chain details</h3>
+            <dl className="evidence-details">
+              <div><dt>Evidence ID</dt><dd>{selected.id}</dd></div>
+              <div><dt>Captured</dt><dd>{selected.captured}</dd></div>
+              <div><dt>File size</dt><dd>{selected.size}</dd></div>
+              <div><dt>Source</dt><dd>{selected.location}</dd></div>
+            </dl>
           </div>
-          <button className="button secondary full">
-            <Download size={16} />
-            Download certificate
-          </button>
         </aside>
       </section>
     </div>
