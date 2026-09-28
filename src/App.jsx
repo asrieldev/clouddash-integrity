@@ -376,7 +376,7 @@ function Dashboard({ videos, alerts, setAlerts }) {
   );
 }
 
-function EvidenceTable({ videos, compact, onSelect }) {
+function EvidenceTable({ videos, compact, onSelect, onPlay }) {
   return (
     <div className="table-wrap">
       <table>
@@ -386,7 +386,7 @@ function EvidenceTable({ videos, compact, onSelect }) {
             <th>Capture location</th>
             <th>Integrity</th>
             <th>Analysis</th>
-            {!compact && <th>Actions</th>}
+            {!compact && onPlay && <th>Play</th>}
           </tr>
         </thead>
         <tbody>
@@ -427,10 +427,13 @@ function EvidenceTable({ videos, compact, onSelect }) {
                   {v.status}
                 </Badge>
               </td>
-              {!compact && (
+              {!compact && onPlay && (
                 <td>
-                  <IconButton label="More actions">
-                    <MoreHorizontal size={18} />
+                  <IconButton label={`Play ${v.name}`} onClick={(event) => {
+                    event.stopPropagation();
+                    onPlay(v);
+                  }}>
+                    <Play size={17} />
                   </IconButton>
                 </td>
               )}
@@ -450,6 +453,9 @@ function Evidence({ videos, setVideos, notify }) {
   const [storedVideos, setStoredVideos] = useState([]);
   const [localVideos, setLocalVideos] = useState([]);
   const [downloading, setDownloading] = useState(false);
+  const [playback, setPlayback] = useState(null);
+  const playbackUrlRef = useRef(null);
+  const localUrlsRef = useRef([]);
   const allVideos = [...localVideos, ...(storedVideos.length ? storedVideos : videos)];
   useEffect(() => {
     if (!supabase) return;
@@ -457,7 +463,7 @@ function Evidence({ videos, setVideos, notify }) {
       .then((segments) => {
         const records = segments.map((segment) => ({
           id: segment.id,
-          name: `dashcam_${segment.sequence}.webm`,
+          name: segment.object_path.split('/').pop(),
           size: `${Math.max(1, Math.round(segment.bytes / 1024))} KB`,
           location: segment.devices?.label || "Driver dashcam",
           captured: new Date(segment.captured_at).toLocaleString(),
@@ -472,6 +478,10 @@ function Evidence({ videos, setVideos, notify }) {
       })
       .catch((error) => notify(`Could not load stored evidence: ${error.message}`));
   }, [notify]);
+  useEffect(() => () => {
+    if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+    localUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
   const filtered = allVideos.filter(
     (v) =>
       v.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -494,7 +504,9 @@ function Evidence({ videos, setVideos, notify }) {
         integrity: serverRecord ? "Verified" : "No matching server record",
         status: serverRecord ? "Hash matched" : "Local hash calculated",
         severity: serverRecord ? "low" : "medium",
+        localUrl: URL.createObjectURL(file),
       };
+      localUrlsRef.current.push(item.localUrl);
       setProgress(100);
       setLocalVideos((items) => [item, ...items]);
       setSelected(item);
@@ -524,6 +536,23 @@ function Evidence({ videos, setVideos, notify }) {
       notify(`Could not download video: ${error.message}`);
     } finally {
       setDownloading(false);
+    }
+  }
+  async function playEvidence(video) {
+    try {
+      if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
+      if (video.localUrl) {
+        playbackUrlRef.current = null;
+        setPlayback({ name: video.name, url: video.localUrl });
+        return;
+      }
+      if (!video.objectPath) throw new Error('This sample record has no stored video. Record a new clip first.');
+      const blob = await downloadEvidenceSegment(video.objectPath);
+      const url = URL.createObjectURL(blob);
+      playbackUrlRef.current = url;
+      setPlayback({ name: video.name, url });
+    } catch (error) {
+      notify(`Could not play video: ${error.message}`);
     }
   }
   return (
@@ -583,7 +612,7 @@ function Evidence({ videos, setVideos, notify }) {
                 Filters
               </button>
             </div>
-            <EvidenceTable videos={filtered} onSelect={setSelected} />
+            <EvidenceTable videos={filtered} onSelect={setSelected} onPlay={playEvidence} />
             {filtered.length === 0 && (
               <Empty text="No evidence matches this search." />
             )}
@@ -625,6 +654,12 @@ function Evidence({ videos, setVideos, notify }) {
           </button>
         </aside>
       </section>
+      {playback && <div className="video-modal" role="dialog" aria-modal="true" aria-label={`Play ${playback.name}`}>
+        <article className="video-modal-content">
+          <div><b>{playback.name}</b><IconButton label="Close video player" onClick={() => setPlayback(null)}><X size={18} /></IconButton></div>
+          <video src={playback.url} controls autoPlay playsInline />
+        </article>
+      </div>}
     </div>
   );
 }
@@ -635,6 +670,7 @@ function Encoder({ notify }) {
   const [elapsed, setElapsed] = useState(0);
   const [locked, setLocked] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [lastClip, setLastClip] = useState(null);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -642,6 +678,7 @@ function Encoder({ notify }) {
   const previousHashRef = useRef(null);
   const nextSequenceRef = useRef(3);
   const offlineRef = useRef(false);
+  const lastClipUrlRef = useRef(null);
   const [segments, setSegments] = useState([
     {
       seq: 2,
@@ -673,6 +710,7 @@ function Encoder({ notify }) {
   useEffect(() => () => {
     if (recorderRef.current?.state !== 'inactive') recorderRef.current?.stop();
     streamRef.current?.getTracks().forEach((track) => track.stop());
+    if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
   useEffect(() => {
     const retry = () => syncQueuedSegments();
@@ -718,12 +756,16 @@ function Encoder({ notify }) {
       setSyncing(false);
     }
   }
-  async function persistChunk(blob) {
+  async function persistChunk(blob, fileInfo) {
     const identity = await prepareIdentity();
-    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder' } });
+    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
     const result = offlineRef.current ? (await enqueueSegment({ ...segment, ...identity, blob }), { queued: true }) : await uploadSegment({ ...identity, segment, blob });
     setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent' }, ...rows].slice(0, 6));
+    const previewUrl = URL.createObjectURL(blob);
+    if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
+    lastClipUrlRef.current = previewUrl;
+    setLastClip({ url: previewUrl, sequence: segment.sequence, extension: fileInfo.extension });
   }
   async function startDashcam() {
     try {
@@ -732,8 +774,10 @@ function Encoder({ notify }) {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
-      const recorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? { mimeType: 'video/webm;codecs=vp9' } : undefined);
-      recorder.ondataavailable = (event) => { if (event.data.size) persistChunk(event.data).catch((error) => notify(`Segment queued: ${error.message}`)); };
+      const mimeType = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8'].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const fileInfo = { mimeType: mimeType || 'video/webm', extension: mimeType?.includes('mp4') ? 'mp4' : 'webm' };
+      recorder.ondataavailable = (event) => { if (event.data.size) persistChunk(event.data, fileInfo).catch((error) => notify(`Segment queued: ${error.message}`)); };
       recorder.start(5000); recorderRef.current = recorder; setRecording(true); notify('Camera recording started. Evidence is segmented every 5 seconds.');
     } catch (error) { notify(error.message || 'Camera access was not granted.'); }
   }
@@ -774,6 +818,11 @@ function Encoder({ notify }) {
                   DEVICE 482f15c9 · GPS protected
                 </span>
               </>
+            ) : lastClip ? (
+              <div className="recorded-preview">
+                <video src={lastClip.url} controls playsInline />
+                <span>Latest captured segment #{lastClip.sequence} ({lastClip.extension.toUpperCase()})</span>
+              </div>
             ) : (
               <div className="camera-off">
                 <Camera size={27} />
