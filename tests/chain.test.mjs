@@ -12,6 +12,13 @@ test('validates an ordered hash chain', async () => {
   assert.deepEqual(await verifyEvidenceChain([first, second]), { valid: true, lastHash: second.chainHash });
 });
 
+test('uses a supplied video fingerprint in the chain', async () => {
+  const contentHash = await sha256('recorded-video-bytes');
+  const segment = await createEvidenceSegment({ sequence: 0, capturedAt: '2026-09-28T14:00:00Z', bytes: 20, contentHash });
+  assert.equal(segment.sha256, contentHash);
+  assert.equal((await verifyEvidenceChain([segment])).valid, true);
+});
+
 test('detects a modified chain entry', async () => {
   const first = await createEvidenceSegment({ sequence: 0, capturedAt: '2026-09-28T14:00:00Z', bytes: 124 });
   const compromised = { ...first, chainHash: '0'.repeat(64) };

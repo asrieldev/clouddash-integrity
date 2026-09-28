@@ -6,11 +6,11 @@ export async function sha256(value) {
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function createEvidenceSegment({ sequence, capturedAt, bytes, previousHash = null, metadata = {} }) {
+export async function createEvidenceSegment({ sequence, capturedAt, bytes, contentHash, previousHash = null, metadata = {} }) {
   const canonical = JSON.stringify({ sequence, capturedAt, bytes, metadata });
-  const contentHash = await sha256(canonical);
-  const chainHash = await sha256(`${previousHash || 'GENESIS'}:${contentHash}:${sequence}`);
-  return { sequence, capturedAt, bytes, metadata, sha256: contentHash, previousHash, chainHash };
+  const segmentHash = contentHash || await sha256(canonical);
+  const chainHash = await sha256(`${previousHash || 'GENESIS'}:${segmentHash}:${sequence}`);
+  return { sequence, capturedAt, bytes, metadata, sha256: segmentHash, previousHash, chainHash };
 }
 
 export async function verifyEvidenceChain(segments) {

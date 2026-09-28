@@ -70,8 +70,8 @@ import { auditLogs, incidents, initialVideos, fmt } from "./lib";
 import { getDashboardMetrics } from "./api";
 import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
-import { createEvidenceSegment } from "./security/chain";
-import { createDevice, uploadSegment } from "./evidenceRepository";
+import { createEvidenceSegment, sha256 } from "./security/chain";
+import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadSegment } from "./evidenceRepository";
 import { enqueueSegment } from "./storage/offlineQueue";
 
 const NAV = [
@@ -447,39 +447,84 @@ function Evidence({ videos, setVideos, notify }) {
   const [selected, setSelected] = useState(videos[0]);
   const [upload, setUpload] = useState(false);
   const [progress, setProgress] = useState(0);
-  const filtered = videos.filter(
+  const [storedVideos, setStoredVideos] = useState([]);
+  const [localVideos, setLocalVideos] = useState([]);
+  const [downloading, setDownloading] = useState(false);
+  const allVideos = [...localVideos, ...(storedVideos.length ? storedVideos : videos)];
+  useEffect(() => {
+    if (!supabase) return;
+    listEvidenceSegments()
+      .then((segments) => {
+        const records = segments.map((segment) => ({
+          id: segment.id,
+          name: `dashcam_${segment.sequence}.webm`,
+          size: `${Math.max(1, Math.round(segment.bytes / 1024))} KB`,
+          location: segment.devices?.label || "Driver dashcam",
+          captured: new Date(segment.captured_at).toLocaleString(),
+          hash: segment.sha256,
+          integrity: segment.status === "transmitted" ? "Verified" : "Pending",
+          status: segment.status,
+          severity: segment.locked ? "high" : "low",
+          objectPath: segment.object_path,
+        }));
+        setStoredVideos(records);
+        if (records[0]) setSelected(records[0]);
+      })
+      .catch((error) => notify(`Could not load stored evidence: ${error.message}`));
+  }, [notify]);
+  const filtered = allVideos.filter(
     (v) =>
       v.name.toLowerCase().includes(query.toLowerCase()) ||
       v.id.toLowerCase().includes(query.toLowerCase()),
   );
-  function uploadFile(file) {
+  async function uploadFile(file) {
     if (!file) return;
     setUpload(true);
     setProgress(0);
-    const timer = setInterval(
-      () =>
-        setProgress((p) => {
-          if (p >= 100) {
-            clearInterval(timer);
-            const item = {
-              ...videos[0],
-              id: `EV-2026-${1843 + videos.length}`,
-              name: file.name,
-              size: `${Math.max(1, file.size / 1024 / 1024).toFixed(1)} MB`,
-              status: "Queued for processing",
-              integrity: "Pending",
-              captured: "Just now",
-            };
-            setVideos((v) => [item, ...v]);
-            setSelected(item);
-            setUpload(false);
-            notify("Evidence accepted into encrypted ingestion queue");
-            return 100;
-          }
-          return p + 10;
-        }),
-      170,
-    );
+    try {
+      const localHash = await sha256(new Uint8Array(await file.arrayBuffer()));
+      const serverRecord = allVideos.find((video) => video.hash === localHash);
+      const item = {
+        id: serverRecord?.id || `LOCAL-${Date.now().toString(36).toUpperCase()}`,
+        name: file.name,
+        size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
+        location: "Local verification file",
+        captured: "Local file",
+        hash: localHash,
+        integrity: serverRecord ? "Verified" : "No matching server record",
+        status: serverRecord ? "Hash matched" : "Local hash calculated",
+        severity: serverRecord ? "low" : "medium",
+      };
+      setProgress(100);
+      setLocalVideos((items) => [item, ...items]);
+      setSelected(item);
+      notify(serverRecord ? "File verified: SHA-256 matches the stored evidence." : "Local SHA-256 calculated. No stored match was found.");
+    } catch (error) {
+      notify(`Could not verify this file: ${error.message}`);
+    } finally {
+      setUpload(false);
+    }
+  }
+  async function downloadSelected() {
+    if (!selected.objectPath) {
+      notify("Downloads are available for recordings created with Driver capture.");
+      return;
+    }
+    setDownloading(true);
+    try {
+      const blob = await downloadEvidenceSegment(selected.objectPath);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = selected.name;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      notify("Video downloaded. Add it here again to verify its SHA-256 fingerprint.");
+    } catch (error) {
+      notify(`Could not download video: ${error.message}`);
+    } finally {
+      setDownloading(false);
+    }
   }
   return (
     <div className="page">
@@ -574,6 +619,10 @@ function Evidence({ videos, setVideos, notify }) {
               <div><dt>Source</dt><dd>{selected.location}</dd></div>
             </dl>
           </div>
+          <button className="button secondary full" onClick={downloadSelected} disabled={downloading}>
+            <Download size={16} />
+            {downloading ? "Downloading..." : "Download video"}
+          </button>
         </aside>
       </section>
     </div>
@@ -635,7 +684,7 @@ function Encoder({ notify }) {
   }
   async function persistChunk(blob) {
     const identity = await prepareIdentity();
-    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder' } });
+    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder' } });
     previousHashRef.current = segment.chainHash;
     const result = offlineRef.current ? (await enqueueSegment({ ...segment, ...identity, blob }), { queued: true }) : await uploadSegment({ ...identity, segment, blob });
     setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent' }, ...rows].slice(0, 6));

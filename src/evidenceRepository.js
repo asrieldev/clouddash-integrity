@@ -23,3 +23,20 @@ export async function uploadSegment({ workspaceId, deviceId, segment, blob }) {
     return { queued: true, error };
   }
 }
+
+export async function listEvidenceSegments() {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from('evidence_segments')
+    .select('id, sequence, captured_at, object_path, sha256, bytes, status, locked, devices(label)')
+    .order('captured_at', { ascending: false });
+  if (error) throw error;
+  return data;
+}
+
+export async function downloadEvidenceSegment(objectPath) {
+  const client = requireSupabase();
+  const { data, error } = await client.storage.from('evidence').download(objectPath);
+  if (error) throw error;
+  return data;
+}
