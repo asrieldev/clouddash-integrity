@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   NavLink,
   Navigate,
@@ -70,6 +70,9 @@ import { auditLogs, incidents, initialVideos, fmt } from "./lib";
 import { getDashboardMetrics } from "./api";
 import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
+import { createEvidenceSegment } from "./security/chain";
+import { createDevice, uploadSegment } from "./evidenceRepository";
+import { enqueueSegment } from "./storage/offlineQueue";
 
 const NAV = [
   ["Dashboard", "/", LayoutDashboard],
@@ -635,6 +638,13 @@ function Encoder({ notify }) {
   const [offline, setOffline] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [locked, setLocked] = useState(false);
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
+  const videoRef = useRef(null);
+  const identityRef = useRef(null);
+  const previousHashRef = useRef(null);
+  const nextSequenceRef = useRef(3);
+  const offlineRef = useRef(false);
   const [segments, setSegments] = useState([
     {
       seq: 2,
@@ -651,30 +661,44 @@ function Encoder({ notify }) {
       state: "Sent",
     },
   ]);
+  useEffect(() => { offlineRef.current = offline; }, [offline]);
   useEffect(() => {
     if (!recording) return;
     const seconds = setInterval(() => setElapsed((v) => v + 1), 1000);
-    const segmenter = setInterval(
-      () =>
-        setSegments((rows) =>
-          [
-            {
-              seq: rows[0].seq + 1,
-              time: new Date().toLocaleTimeString("en-GB"),
-              hash: Math.random().toString(16).slice(2, 14),
-              size: `${330 + Math.floor(Math.random() * 90)} KB`,
-              state: offline ? "Queued" : "Sent",
-            },
-            ...rows,
-          ].slice(0, 6),
-        ),
-      5000,
-    );
-    return () => {
-      clearInterval(seconds);
-      clearInterval(segmenter);
-    };
-  }, [recording, offline]);
+    return () => clearInterval(seconds);
+  }, [recording]);
+  useEffect(() => () => streamRef.current?.getTracks().forEach((track) => track.stop()), []);
+  async function prepareIdentity() {
+    if (identityRef.current) return identityRef.current;
+    if (!supabase) throw new Error('Supabase is not configured.');
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Sign in is required before recording.');
+    const { data: workspaceId, error: workspaceError } = await supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' });
+    if (workspaceError) throw workspaceError;
+    let { data: device } = await supabase.from('devices').select('id').eq('workspace_id', workspaceId).limit(1).maybeSingle();
+    if (!device) device = await createDevice(workspaceId);
+    identityRef.current = { workspaceId, deviceId: device.id };
+    return identityRef.current;
+  }
+  async function persistChunk(blob) {
+    const identity = await prepareIdentity();
+    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder' } });
+    previousHashRef.current = segment.chainHash;
+    const result = offlineRef.current ? (await enqueueSegment({ ...segment, ...identity, blob }), { queued: true }) : await uploadSegment({ ...identity, segment, blob });
+    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent' }, ...rows].slice(0, 6));
+  }
+  async function startDashcam() {
+    try {
+      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('This browser does not support camera recording.');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      streamRef.current = stream;
+      if (videoRef.current) videoRef.current.srcObject = stream;
+      const recorder = new MediaRecorder(stream, MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? { mimeType: 'video/webm;codecs=vp9' } : undefined);
+      recorder.ondataavailable = (event) => { if (event.data.size) persistChunk(event.data).catch((error) => notify(`Segment queued: ${error.message}`)); };
+      recorder.start(5000); recorderRef.current = recorder; setRecording(true); notify('Camera recording started. Evidence is segmented every 5 seconds.');
+    } catch (error) { notify(error.message || 'Camera access was not granted.'); }
+  }
+  function stopDashcam() { recorderRef.current?.stop(); streamRef.current?.getTracks().forEach((track) => track.stop()); recorderRef.current = null; streamRef.current = null; setRecording(false); notify('Dashcam recording stopped'); }
   const duration = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
   const latest = segments[0];
   return (
@@ -705,11 +729,7 @@ function Encoder({ notify }) {
           <div className={recording ? "camera-stage active" : "camera-stage"}>
             {recording ? (
               <>
-                <div className="camera-road">
-                  <i />
-                  <i />
-                  <i />
-                </div>
+                <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 <span className="rec-dot">REC {duration}</span>
                 <span className="camera-label">
                   DEVICE 482f15c9 · GPS protected
@@ -726,14 +746,7 @@ function Encoder({ notify }) {
           <div className="encoder-actions">
             <button
               className={recording ? "button danger" : "button primary"}
-              onClick={() => {
-                setRecording((v) => !v);
-                notify(
-                  recording
-                    ? "Dashcam recording stopped"
-                    : "Secure recording started",
-                );
-              }}
+              onClick={recording ? stopDashcam : startDashcam}
             >
               {recording ? (
                 <>
