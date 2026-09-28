@@ -700,7 +700,7 @@ function Encoder({ notify }) {
   useEffect(() => () => {
     recordingRef.current = false;
     if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
-    if (recorderRef.current?.state !== 'inactive') recorderRef.current.stop();
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     else streamRef.current?.getTracks().forEach((track) => track.stop());
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
@@ -807,7 +807,7 @@ function Encoder({ notify }) {
   function stopDashcam() {
     recordingRef.current = false;
     if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
-    if (recorderRef.current?.state !== 'inactive') recorderRef.current.stop();
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     else streamRef.current?.getTracks().forEach((track) => track.stop());
     setRecording(false);
     notify('Finalizing the last video segment...');
