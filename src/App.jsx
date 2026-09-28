@@ -672,6 +672,7 @@ function Encoder({ notify }) {
   const [syncing, setSyncing] = useState(false);
   const [lastClip, setLastClip] = useState(null);
   const [segmentLength, setSegmentLength] = useState(5);
+  const [recordingSource, setRecordingSource] = useState('camera');
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -683,6 +684,7 @@ function Encoder({ notify }) {
   const recordingRef = useRef(false);
   const segmentTimerRef = useRef(null);
   const segmentLengthRef = useRef(5);
+  const simulationVideoRef = useRef(null);
   const [segments, setSegments] = useState([]);
   useEffect(() => { offlineRef.current = offline; }, [offline]);
   useEffect(() => { segmentLengthRef.current = segmentLength; }, [segmentLength]);
@@ -702,6 +704,8 @@ function Encoder({ notify }) {
     if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     else streamRef.current?.getTracks().forEach((track) => track.stop());
+    simulationVideoRef.current?.pause();
+    simulationVideoRef.current = null;
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
   useEffect(() => {
@@ -760,11 +764,11 @@ function Encoder({ notify }) {
     setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', preview: recordedClip }, ...rows].slice(0, 12));
     setLastClip(recordedClip);
   }
-  function beginSegment(stream) {
+  function beginSegment(stream, source) {
     const mimeType = ['video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
     const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
     const chunks = [];
-    const fileInfo = { mimeType: mimeType || 'video/webm', extension: 'webm' };
+    const fileInfo = { mimeType: mimeType || 'video/webm', extension: 'webm', source };
     recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     recorder.onstop = async () => {
       if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
@@ -778,9 +782,11 @@ function Encoder({ notify }) {
         }
       }
       if (recordingRef.current && streamRef.current === stream && stream.active) {
-        beginSegment(stream);
+        beginSegment(stream, source);
       } else {
         stream.getTracks().forEach((track) => track.stop());
+        simulationVideoRef.current?.pause();
+        simulationVideoRef.current = null;
         recorderRef.current = null;
       }
     };
@@ -790,25 +796,48 @@ function Encoder({ notify }) {
       if (recorder.state !== 'inactive') recorder.stop();
     }, segmentLengthRef.current * 1000);
   }
+  async function createSimulationStream() {
+    const source = document.createElement('video');
+    source.src = '/driving-simulation.mp4';
+    source.muted = true;
+    source.loop = true;
+    source.playsInline = true;
+    await new Promise((resolve, reject) => {
+      source.onloadeddata = resolve;
+      source.onerror = () => reject(new Error('The driving simulation video could not be loaded.'));
+    });
+    await source.play();
+    const capture = source.captureStream || source.mozCaptureStream;
+    if (!capture) throw new Error('This browser cannot record the driving simulation. Use Chrome or Edge.');
+    simulationVideoRef.current = source;
+    return capture.call(source);
+  }
   async function startDashcam() {
     try {
-      if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('This browser does not support camera recording.');
+      if (!window.MediaRecorder) throw new Error('This browser does not support video recording.');
       await prepareIdentity();
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      const stream = recordingSource === 'simulation'
+        ? await createSimulationStream()
+        : await navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      if (!stream) throw new Error('This browser does not support camera recording.');
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       recordingRef.current = true;
       setElapsed(0);
       setRecording(true);
-      beginSegment(stream);
-      notify('Camera recording started. Each segment is saved as a complete playable video file.');
+      beginSegment(stream, recordingSource);
+      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} recording started. Each segment is saved as a complete playable video file.`);
     } catch (error) { notify(error.message || 'Camera access was not granted.'); }
   }
   function stopDashcam() {
     recordingRef.current = false;
     if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
-    else streamRef.current?.getTracks().forEach((track) => track.stop());
+    else {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+      simulationVideoRef.current?.pause();
+      simulationVideoRef.current = null;
+    }
     setRecording(false);
     notify('Finalizing the last video segment...');
   }
@@ -845,7 +874,7 @@ function Encoder({ notify }) {
                 <video ref={videoRef} autoPlay muted playsInline style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 <span className="rec-dot">REC {duration}</span>
                 <span className="camera-label">
-                  DEVICE 482f15c9 · GPS protected
+                  {recordingSource === 'simulation' ? 'DRIVING SIMULATION · moving road source' : 'DEVICE 482f15c9 · GPS protected'}
                 </span>
               </>
             ) : lastClip ? (
@@ -911,6 +940,13 @@ function Encoder({ notify }) {
             </button>
           </div>
           <div className="encoder-selects">
+            <label>
+              Recording source
+              <select value={recordingSource} disabled={recording} onChange={(event) => setRecordingSource(event.target.value)}>
+                <option value="camera">Camera</option>
+                <option value="simulation">Driving simulation</option>
+              </select>
+            </label>
             <label>
               Segment length
               <select value={segmentLength} onChange={(event) => setSegmentLength(Number(event.target.value))}>
