@@ -71,8 +71,8 @@ import { getDashboardMetrics } from "./api";
 import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256 } from "./security/chain";
-import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadSegment } from "./evidenceRepository";
-import { enqueueSegment } from "./storage/offlineQueue";
+import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadQueuedSegment, uploadSegment } from "./evidenceRepository";
+import { enqueueSegment, flushQueue } from "./storage/offlineQueue";
 
 const NAV = [
   ["Live monitor", "/", Activity],
@@ -634,6 +634,7 @@ function Encoder({ notify }) {
   const [offline, setOffline] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [locked, setLocked] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
@@ -669,7 +670,16 @@ function Encoder({ notify }) {
       videoRef.current.play().catch(() => {});
     }
   }, [recording]);
-  useEffect(() => () => streamRef.current?.getTracks().forEach((track) => track.stop()), []);
+  useEffect(() => () => {
+    if (recorderRef.current?.state !== 'inactive') recorderRef.current?.stop();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+  useEffect(() => {
+    const retry = () => syncQueuedSegments();
+    window.addEventListener('online', retry);
+    retry();
+    return () => window.removeEventListener('online', retry);
+  }, []);
   async function prepareIdentity() {
     if (identityRef.current) return identityRef.current;
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -679,8 +689,34 @@ function Encoder({ notify }) {
     if (workspaceError) throw workspaceError;
     let { data: device } = await supabase.from('devices').select('id').eq('workspace_id', workspaceId).limit(1).maybeSingle();
     if (!device) device = await createDevice(workspaceId);
+    const { data: latest, error: sequenceError } = await supabase
+      .from('evidence_segments')
+      .select('sequence')
+      .eq('device_id', device.id)
+      .order('sequence', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (sequenceError) throw sequenceError;
+    nextSequenceRef.current = latest ? latest.sequence + 1 : 0;
     identityRef.current = { workspaceId, deviceId: device.id };
     return identityRef.current;
+  }
+  async function syncQueuedSegments() {
+    if (offlineRef.current || !navigator.onLine) return;
+    setSyncing(true);
+    try {
+      const synced = await flushQueue((queued) => uploadQueuedSegment({
+        workspaceId: queued.workspaceId,
+        deviceId: queued.deviceId,
+        segment: queued,
+        blob: queued.blob,
+      }));
+      if (synced) notify(`${synced} queued video segment${synced === 1 ? '' : 's'} uploaded.`);
+    } catch (error) {
+      notify(`Queued video is waiting for a connection: ${error.message}`);
+    } finally {
+      setSyncing(false);
+    }
   }
   async function persistChunk(blob) {
     const identity = await prepareIdentity();
@@ -692,6 +728,7 @@ function Encoder({ notify }) {
   async function startDashcam() {
     try {
       if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) throw new Error('This browser does not support camera recording.');
+      await prepareIdentity();
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
@@ -778,12 +815,16 @@ function Encoder({ notify }) {
             <button
               className="button secondary"
               onClick={() => {
-                setOffline((v) => !v);
-                notify(
-                  offline
-                    ? "Uplink restored. Queued segments will transmit."
-                    : "Network loss simulated. Segments are retained locally.",
-                );
+                if (offline) {
+                  offlineRef.current = false;
+                  setOffline(false);
+                  syncQueuedSegments();
+                  notify("Uplink restored. Queued segments are uploading.");
+                } else {
+                  offlineRef.current = true;
+                  setOffline(true);
+                  notify("Network loss simulated. Segments are retained locally.");
+                }
               }}
             >
               {offline ? <Send size={16} /> : <WifiOff size={16} />}{" "}
@@ -834,7 +875,7 @@ function Encoder({ notify }) {
             <Metric
               label="Outbox pending"
               value={segments.filter((x) => x.state === "Queued").length}
-              change={offline ? "Awaiting uplink" : "No pending segments"}
+              change={syncing ? "Uploading queued clips" : offline ? "Awaiting uplink" : "No pending segments"}
               icon={Send}
               tone="amber"
             />
