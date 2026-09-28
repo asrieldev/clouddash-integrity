@@ -1,0 +1,36 @@
+{
+  "name": "clouddash-integrity",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "server": "node server/index.js",
+    "start": "concurrently \"npm run server\" \"npm run dev\"",
+    "build": "vite build",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "prisma db seed"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.66.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.468.0",
+    "multer": "^1.4.5-lts.1",
+    "prisma": "^6.3.0",
+    "@prisma/client": "^6.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.1.5",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "concurrently": "^9.1.2",
+    "vite": "^6.1.0"
+  },
+  "prisma": { "seed": "node prisma/seed.js" }
+}
