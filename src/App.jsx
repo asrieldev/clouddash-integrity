@@ -152,7 +152,7 @@ function Layout({ children, alerts, setAlerts }) {
   const loc = useLocation();
   return (
     <div className="focused-shell">
-      <header className="app-topbar">
+      <aside className="app-sidepanel">
         <NavLink to="/" className="app-identity" aria-label="CloudDash home">
           <span className="brand-mark"><ShieldCheck size={19} /></span>
           <span>
@@ -160,7 +160,7 @@ function Layout({ children, alerts, setAlerts }) {
             <strong>CloudDash</strong>
           </span>
         </NavLink>
-        <nav className="top-navigation" aria-label="Primary navigation">
+        <nav className="side-navigation" aria-label="Primary navigation">
           {NAV.map(([name, path, Icon]) => (
             <NavLink key={path} to={path} end={path === "/"}>
               <Icon size={16} />
@@ -168,8 +168,8 @@ function Layout({ children, alerts, setAlerts }) {
             </NavLink>
           ))}
         </nav>
-        <div className="top-status"><span className="signal" /> Secure sync</div>
-      </header>
+        <div className="side-status"><span className="signal" /> Secure sync</div>
+      </aside>
       <main className="focused-main">
         {children}
       </main>
