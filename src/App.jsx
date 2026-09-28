@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Activity, AlertTriangle, Archive, Bell, BookOpen, Boxes, Check, ChevronDown, ChevronLeft, CircleHelp, Clock3, Cloud, Cpu, Download, FileCheck2, FileVideo, Gauge, HardDriveUpload, KeyRound, LayoutDashboard, ListFilter, LoaderCircle, LockKeyhole, MapPinned, Menu, MoreHorizontal, Play, Plus, Search, Settings, ShieldCheck, UserCog, Users, Wallet, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Archive, Bell, BookOpen, Boxes, Check, ChevronDown, ChevronLeft, CircleHelp, Clock3, Cloud, Cpu, Download, FileCheck2, FileVideo, Gauge, HardDriveUpload, KeyRound, LayoutDashboard, ListFilter, LoaderCircle, LockKeyhole, MapPinned, Menu, MoreHorizontal, Play, Plus, Search, Settings, ShieldCheck, UserCog, Users as UsersIcon, Wallet, X, Zap } from 'lucide-react';
 import { auditLogs, incidents, initialVideos, fmt } from './lib';
 
 const NAV = [
-  ['Dashboard', '/', LayoutDashboard], ['Video Evidence', '/evidence', FileVideo], ['Ingestion Queue', '/queue', HardDriveUpload], ['Incidents', '/incidents', AlertTriangle], ['Alerts', '/alerts', Bell], ['Integrity Center', '/integrity', ShieldCheck], ['Map View', '/map', MapPinned], ['Analytics', '/analytics', Activity], ['Cost Monitoring', '/costs', Wallet], ['System Health', '/health', Gauge], ['Audit Logs', '/audit', Archive], ['User Management', '/users', Users], ['Settings', '/settings', Settings], ['Documentation', '/documentation', BookOpen]
+  ['Dashboard', '/', LayoutDashboard], ['Video Evidence', '/evidence', FileVideo], ['Ingestion Queue', '/queue', HardDriveUpload], ['Incidents', '/incidents', AlertTriangle], ['Alerts', '/alerts', Bell], ['Integrity Center', '/integrity', ShieldCheck], ['Map View', '/map', MapPinned], ['Analytics', '/analytics', Activity], ['Cost Monitoring', '/costs', Wallet], ['System Health', '/health', Gauge], ['Audit Logs', '/audit', Archive], ['User Management', '/users', UsersIcon], ['Settings', '/settings', Settings], ['Documentation', '/documentation', BookOpen]
 ];
 const chartData = [{d:'Mon',v:18,c:72},{d:'Tue',v:25,c:78},{d:'Wed',v:20,c:74},{d:'Thu',v:34,c:88},{d:'Fri',v:29,c:82},{d:'Sat',v:16,c:58},{d:'Sun',v:22,c:67}];
 const pieData = [{name:'Collision',value:42,color:'#ef4444'},{name:'Traffic',value:28,color:'#2563eb'},{name:'Pedestrian',value:18,color:'#f59e0b'},{name:'Other',value:12,color:'#64748b'}];
