@@ -1688,3 +1688,41 @@ code {
     margin: 0;
   }
 }
+
+/* Focused evidence workspace: advanced routes remain available, but daily work stays compact. */
+.focused-shell { min-height: 100vh; background: #080d1d; }
+.app-topbar { min-height: 64px; display: flex; align-items: center; gap: 34px; padding: 0 max(24px, calc((100vw - 1360px) / 2)); border-bottom: 1px solid #202b40; background: #0b1120; }
+.app-identity { display: flex; align-items: center; gap: 10px; min-width: 190px; text-decoration: none; color: #f8fafc; }
+.app-identity .brand-mark { width: 29px; height: 29px; border-radius: 7px; background: #1c5b8c; color: #d7f0ff; }
+.app-identity > span:last-child { display: grid; gap: 2px; }
+.app-identity small { color: #8da0bd; font-size: 9px; font-weight: 500; letter-spacing: 1.1px; }
+.app-identity strong { font-size: 15px; line-height: 1; letter-spacing: 0; }
+.top-navigation { display: flex; align-self: stretch; align-items: center; gap: 6px; overflow-x: auto; }
+.top-navigation a { display: inline-flex; height: 36px; align-items: center; gap: 7px; padding: 0 11px; color: #9baac2; text-decoration: none; font-size: 12px; font-weight: 600; border-radius: 6px; white-space: nowrap; }
+.top-navigation a:hover { color: #e9f2ff; background: #131d30; }
+.top-navigation a.active { color: #d9eafe; background: #183c5d; }
+.top-status { margin-left: auto; display: flex; align-items: center; gap: 7px; color: #9fb1c9; font-size: 11px; white-space: nowrap; }
+.focused-main { width: 100%; min-height: calc(100vh - 64px); }
+.focused-main .page { max-width: 1360px; padding: 28px 24px 46px; }
+.monitor-page { display: grid; gap: 16px; }
+.monitor-page .section-head { margin: 0 0 2px; }
+.monitor-page .section-head h1 { font-size: 20px; }
+.monitor-page .badge .signal { margin-right: 5px; width: 6px; height: 6px; }
+.monitor-metrics { margin: 0; }
+.monitor-metrics .metric { min-height: 94px; }
+.monitor-sessions, .fingerprint-stream { margin: 0; }
+.monitor-sessions .button { text-decoration: none; }
+.fingerprint-list { display: grid; border-top: 1px solid #1f2937; }
+.fingerprint-list > div { display: grid; grid-template-columns: 50px 110px minmax(160px, 1fr) auto; gap: 14px; align-items: center; min-height: 50px; padding: 0 10px; border-bottom: 1px solid #1f2937; }
+.fingerprint-list span { color: #71809a; font-size: 11px; }
+.fingerprint-list b { color: #d6e2f2; font-size: 11px; font-weight: 600; }
+.fingerprint-list code { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: #73d4f4; }
+@media (max-width: 780px) {
+  .app-topbar { min-height: auto; padding: 12px 15px; gap: 12px; flex-wrap: wrap; }
+  .app-identity { min-width: 0; }
+  .top-navigation { order: 3; width: 100%; padding-top: 4px; }
+  .top-status { font-size: 10px; }
+  .focused-main .page { padding: 20px 15px 34px; }
+  .fingerprint-list > div { grid-template-columns: 38px 1fr auto; gap: 8px; }
+  .fingerprint-list code { grid-column: 2; }
+}

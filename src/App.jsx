@@ -75,21 +75,10 @@ import { createDevice, uploadSegment } from "./evidenceRepository";
 import { enqueueSegment } from "./storage/offlineQueue";
 
 const NAV = [
-  ["Dashboard", "/", LayoutDashboard],
-  ["Video Evidence", "/evidence", FileVideo],
-  ["Dashcam Encoder", "/encoder", Radio],
-  ["Ingestion Queue", "/queue", HardDriveUpload],
-  ["Incidents", "/incidents", AlertTriangle],
-  ["Alerts", "/alerts", Bell],
-  ["Integrity Center", "/integrity", ShieldCheck],
-  ["Map View", "/map", MapPinned],
-  ["Analytics", "/analytics", Activity],
-  ["Cost Monitoring", "/costs", Wallet],
-  ["System Health", "/health", Gauge],
-  ["Audit Logs", "/audit", Archive],
-  ["User Management", "/users", UsersIcon],
-  ["Settings", "/settings", Settings],
-  ["Documentation", "/documentation", BookOpen],
+  ["Live monitor", "/", Activity],
+  ["Verify evidence", "/evidence", ShieldCheck],
+  ["Driver capture", "/encoder", Camera],
+  ["Integrity log", "/integrity", FileCheck2],
 ];
 const chartData = [
   { d: "Mon", v: 18, c: 72 },
@@ -159,82 +148,62 @@ function Empty({ text }) {
 }
 
 function Layout({ children, alerts, setAlerts }) {
-  const [open, setOpen] = useState(false);
   const loc = useLocation();
-  useEffect(() => setOpen(false), [loc.pathname]);
   return (
-    <div className="shell">
-      <aside className={open ? "sidebar open" : "sidebar"}>
-        <div className="brand">
-          <div className="brand-mark">
-            <ShieldCheck size={21} />
-          </div>
-          <span>CloudDash</span>
-          <small>INTEGRITY</small>
-          <IconButton
-            label="Collapse navigation"
-            onClick={() => setOpen(false)}
-          >
-            <ChevronLeft size={18} />
-          </IconButton>
-        </div>
-        <button className="workspace">
-          <span className="workspace-dot" />
-          Forensics Lab <ChevronDown size={15} />
-        </button>
-        <nav>
+    <div className="focused-shell">
+      <header className="app-topbar">
+        <NavLink to="/" className="app-identity" aria-label="CloudDash home">
+          <span className="brand-mark"><ShieldCheck size={19} /></span>
+          <span>
+            <small>INTEGRITY RELAY</small>
+            <strong>CloudDash</strong>
+          </span>
+        </NavLink>
+        <nav className="top-navigation" aria-label="Primary navigation">
           {NAV.map(([name, path, Icon]) => (
             <NavLink key={path} to={path} end={path === "/"}>
-              <Icon size={18} />
-              <span>{name}</span>
-              {name === "Alerts" &&
-                alerts.filter((a) => !a.resolved).length > 0 && (
-                  <b>{alerts.filter((a) => !a.resolved).length}</b>
-                )}
+              <Icon size={16} />
+              {name}
             </NavLink>
           ))}
         </nav>
-        <div className="account">
-          <div className="avatar">ML</div>
-          <div>
-            <strong>Marie Laurent</strong>
-            <span>Senior analyst</span>
-          </div>
-          <ChevronDown size={15} />
-        </div>
-      </aside>
-      <main>
-        <header>
-          <IconButton label="Open navigation" onClick={() => setOpen(true)}>
-            <Menu size={21} />
-          </IconButton>
-          <div className="breadcrumbs">
-            <span>Forensics Lab</span>
-            <b>/</b>
-            <strong>
-              {NAV.find((n) => n[1] === loc.pathname)?.[0] || "Workspace"}
-            </strong>
-          </div>
-          <div className="header-actions">
-            <div className="search">
-              <Search size={17} />
-              <input
-                placeholder="Search evidence, incidents..."
-                aria-label="Search"
-              />
-            </div>
-            <IconButton label="Notifications">
-              <Bell size={19} />
-              <i />
-            </IconButton>
-            <div className="status-dot">
-              <span />
-              All systems operational
-            </div>
-          </div>
-        </header>
+        <div className="top-status"><span className="signal" /> Secure sync</div>
+      </header>
+      <main className="focused-main">
         {children}
       </main>
+    </div>
+  );
+}
+
+function Monitor({ videos }) {
+  const valid = videos.filter((video) => video.integrity === "Verified").length;
+  return (
+    <div className="page monitor-page">
+      <SectionHead
+        title="Live monitor"
+        copy="A concise view of incoming evidence and chain integrity."
+        action={<Badge tone="success"><span className="signal" /> Realtime connected</Badge>}
+      />
+      <section className="metrics monitor-metrics">
+        <Metric label="Evidence records" value={videos.length} change="Latest 300 records" icon={FileVideo} />
+        <Metric label="Chain verified" value={valid} change="Signature and sequence checked" icon={ShieldCheck} tone="green" />
+        <Metric label="Needs review" value={videos.length - valid} change="Analyst attention" icon={AlertTriangle} tone="amber" />
+        <Metric label="Capture devices" value="1" change="Driver device online" icon={Camera} tone="violet" />
+      </section>
+      <section className="panel monitor-sessions">
+        <div className="panel-title">
+          <div><h2>Evidence sessions</h2><p>Every session is checked in sequence before it appears here.</p></div>
+          <NavLink className="button secondary" to="/encoder"><Camera size={16} /> Open capture</NavLink>
+        </div>
+        <div className="table-wrap"><table><thead><tr><th>Evidence</th><th>Captured</th><th>Location</th><th>Integrity</th><th /></tr></thead><tbody>
+          {videos.map((video) => <tr key={video.id}><td><b>{video.id}</b><small>{video.name}</small></td><td>{video.captured}</td><td>{video.location}</td><td><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity}</Badge></td><td><NavLink to="/evidence" className="text-button">Inspect</NavLink></td></tr>)}
+        </tbody></table></div>
+      </section>
+      <section className="panel fingerprint-stream">
+        <div className="panel-title"><div><h2>Incoming fingerprints</h2><p>Hashes are checked when a segment reaches the evidence service.</p></div><Badge tone="success">Chain intact</Badge></div>
+        <div className="fingerprint-list">{videos.map((video, index) => <div key={video.hash}><span>#{String(videos.length - index).padStart(2, "0")}</span><b>{video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
+      </section>
     </div>
   );
 }
@@ -1904,11 +1873,7 @@ function CloudDash() {
           <Route
             path="/"
             element={
-              <Dashboard
-                videos={videos}
-                alerts={alerts}
-                setAlerts={setAlerts}
-              />
+              <Monitor videos={videos} />
             }
           />
           <Route
