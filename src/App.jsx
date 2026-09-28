@@ -179,6 +179,7 @@ function Layout({ children, alerts, setAlerts }) {
 
 function Monitor({ videos, notify }) {
   const [stored, setStored] = useState([]);
+  const [selectedSessionId, setSelectedSessionId] = useState(null);
   const records = stored.length ? stored : videos;
   const reload = async () => {
     if (!supabase) return;
@@ -188,7 +189,11 @@ function Monitor({ videos, notify }) {
         id: segment.id,
         name: segment.object_path.split('/').pop(),
         captured: new Date(segment.captured_at).toLocaleString(),
+        capturedAt: segment.captured_at,
         location: segment.devices?.label || 'Driver dashcam',
+        deviceId: segment.device_id,
+        sequence: segment.sequence,
+        bytes: segment.bytes,
         hash: segment.sha256,
         integrity: segment.status === 'transmitted' ? 'Verified' : 'Pending',
       })));
@@ -196,6 +201,26 @@ function Monitor({ videos, notify }) {
   };
   useEffect(() => { reload(); }, []);
   const valid = records.filter((video) => video.integrity === "Verified").length;
+  const sessions = [...records]
+    .sort((a, b) => new Date(a.capturedAt || 0) - new Date(b.capturedAt || 0))
+    .reduce((groups, record) => {
+      const deviceId = record.deviceId || record.location || 'local';
+      const startedAt = new Date(record.capturedAt || 0).getTime();
+      const latest = groups.at(-1);
+      if (!latest || latest.deviceId !== deviceId || startedAt - latest.endAt > 90000) {
+        groups.push({ id: `${deviceId}-${record.id}`, deviceId, device: record.location, startAt: startedAt, endAt: startedAt, records: [record] });
+      } else {
+        latest.records.push(record);
+        latest.endAt = startedAt;
+      }
+      return groups;
+    }, []);
+  const selectedSession = sessions.find((session) => session.id === selectedSessionId) || sessions.at(-1);
+  const formatWindow = (session) => {
+    const start = new Date(session.startAt);
+    const end = new Date(session.endAt);
+    return Number.isNaN(start.getTime()) ? 'Local demo data' : `${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} - ${end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
+  };
   return (
     <div className="page monitor-page">
       <SectionHead
@@ -214,13 +239,17 @@ function Monitor({ videos, notify }) {
           <div><h2>Evidence sessions</h2><p>Every session is checked in sequence before it appears here.</p></div>
           <NavLink className="button secondary" to="/encoder"><Camera size={16} /> Open capture</NavLink>
         </div>
-        <div className="table-wrap"><table><thead><tr><th>Evidence</th><th>Captured</th><th>Location</th><th>Integrity</th><th /></tr></thead><tbody>
-          {records.map((video) => <tr key={video.id}><td><b>{video.id}</b><small>{video.name}</small></td><td>{video.captured}</td><td>{video.location}</td><td><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity}</Badge></td><td><NavLink to="/evidence" className="text-button">Inspect</NavLink></td></tr>)}
-        </tbody></table></div>
+        {sessions.length ? <div className="table-wrap"><table><thead><tr><th>Session</th><th>Device</th><th>Capture window</th><th>Segments</th><th>Size</th><th>Integrity</th><th /></tr></thead><tbody>
+          {sessions.map((session, index) => {
+            const sessionValid = session.records.every((record) => record.integrity === 'Verified');
+            const totalBytes = session.records.reduce((total, record) => total + (record.bytes || 0), 0);
+            return <tr key={session.id} className="clickable" onClick={() => setSelectedSessionId(session.id)}><td><b>Session {String(index + 1).padStart(2, '0')}</b><small>{session.records[0].id.slice(0, 8)}</small></td><td>{session.device}</td><td>{formatWindow(session)}</td><td>{session.records.length}</td><td>{totalBytes ? `${Math.max(1, Math.round(totalBytes / 1024))} KB` : 'Pending'}</td><td><Badge tone={sessionValid ? 'success' : 'warning'}>{sessionValid ? 'Verified' : 'Review'}</Badge></td><td><NavLink to="/integrity" className="text-button" onClick={(event) => event.stopPropagation()}>Audit</NavLink></td></tr>;
+          })}
+        </tbody></table></div> : <Empty text="No evidence sessions yet. Start Driver capture to create one." />}
       </section>
       <section className="panel fingerprint-stream">
-        <div className="panel-title"><div><h2>Incoming fingerprints</h2><p>Hashes are checked when a segment reaches the evidence service.</p></div><Badge tone="success">Chain intact</Badge></div>
-        <div className="fingerprint-list">{records.map((video, index) => <div key={video.hash}><span>#{String(records.length - index).padStart(2, "0")}</span><b>{video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
+        <div className="panel-title"><div><h2>{selectedSession ? 'Selected session segments' : 'Incoming fingerprints'}</h2><p>{selectedSession ? `${selectedSession.device} - ${formatWindow(selectedSession)}` : 'Hashes are checked when a segment reaches the evidence service.'}</p></div>{selectedSession && <Badge tone="info">{selectedSession.records.length} segments</Badge>}</div>
+        <div className="fingerprint-list">{(selectedSession?.records || records).map((video, index) => <div key={video.id}><span>#{video.sequence ?? String(index + 1).padStart(2, '0')}</span><b>{video.name || video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
       </section>
     </div>
   );
