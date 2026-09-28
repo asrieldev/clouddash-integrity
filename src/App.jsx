@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
 import {
   NavLink,
   Navigate,
@@ -801,56 +802,83 @@ function Encoder({ notify }) {
     canvas.width = 1280;
     canvas.height = 720;
     if (!canvas.captureStream) throw new Error('This browser cannot record the driving simulation. Use Chrome or Edge.');
-    const context = canvas.getContext('2d');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    renderer.setSize(canvas.width, canvas.height, false);
+    renderer.setPixelRatio(1);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#8bc1e8');
+    scene.fog = new THREE.Fog('#8bc1e8', 30, 125);
+    const camera = new THREE.PerspectiveCamera(55, canvas.width / canvas.height, 0.1, 180);
+    camera.position.set(0, 2.65, 6.5);
+    camera.lookAt(0, 1, -31);
+    scene.add(new THREE.HemisphereLight('#d9efff', '#34533a', 2.1));
+    const sun = new THREE.DirectionalLight('#fff0c9', 2.4);
+    sun.position.set(-18, 28, 8);
+    scene.add(sun);
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(210, 210), new THREE.MeshLambertMaterial({ color: '#5e9f63' }));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.z = -62;
+    scene.add(ground);
+    const road = new THREE.Mesh(new THREE.BoxGeometry(12, 0.16, 180), new THREE.MeshLambertMaterial({ color: '#3d4652' }));
+    road.position.set(0, 0, -62);
+    scene.add(road);
+    const edgeMaterial = new THREE.MeshBasicMaterial({ color: '#e7d26e' });
+    [-5.75, 5.75].forEach((x) => {
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 180), edgeMaterial);
+      edge.position.set(x, 0.1, -62);
+      scene.add(edge);
+    });
+    const laneMarkers = Array.from({ length: 10 }, (_, index) => {
+      const marker = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.035, 5.8), new THREE.MeshBasicMaterial({ color: '#fff7cf' }));
+      marker.position.set(0, 0.11, -index * 13 - 4);
+      scene.add(marker);
+      return marker;
+    });
+    const makeCar = (color) => {
+      const car = new THREE.Group();
+      const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.6, 3.6), new THREE.MeshLambertMaterial({ color }));
+      body.position.y = 0.52;
+      car.add(body);
+      const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.58, 1.85), new THREE.MeshLambertMaterial({ color: '#b8d6e6' }));
+      cabin.position.set(0, 1.1, -0.25);
+      car.add(cabin);
+      const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.18, 0.28), new THREE.MeshLambertMaterial({ color: '#151b27' }));
+      bumper.position.set(0, 0.34, 1.72);
+      car.add(bumper);
+      [-0.92, 0.92].forEach((x) => [-1.14, 1.14].forEach((z) => {
+        const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.22, 16), new THREE.MeshLambertMaterial({ color: '#15181f' }));
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(x, 0.34, z);
+        car.add(wheel);
+      }));
+      const lamps = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.16, 0.08), new THREE.MeshBasicMaterial({ color: '#ff7373' }));
+      lamps.position.set(0, 0.58, 1.84);
+      car.add(lamps);
+      scene.add(car);
+      return car;
+    };
+    const traffic = [
+      { car: makeCar('#347ab5'), lane: 0, start: -32, speed: 0.035 },
+      { car: makeCar('#d77a3e'), lane: -3.05, start: -52, speed: 0.024 },
+      { car: makeCar('#d9dce0'), lane: 3.05, start: -76, speed: 0.019 },
+    ];
+    traffic.forEach((vehicle) => vehicle.car.position.set(vehicle.lane, 0, vehicle.start));
     let frameId;
     let active = true;
-    const drawCar = (x, y, scale, color) => {
-      const width = 96 * scale;
-      const height = 132 * scale;
-      context.fillStyle = '#171d2b';
-      context.fillRect(x - width / 2, y - height / 2, width, height);
-      context.fillStyle = color;
-      context.fillRect(x - width / 2 + 7 * scale, y - height / 2 + 8 * scale, width - 14 * scale, height - 24 * scale);
-      context.fillStyle = '#b7d5e8';
-      context.fillRect(x - width * 0.32, y - height * 0.28, width * 0.64, height * 0.24);
-      context.fillStyle = '#f87171';
-      context.fillRect(x - width * 0.34, y + height * 0.27, width * 0.18, 8 * scale);
-      context.fillRect(x + width * 0.16, y + height * 0.27, width * 0.18, 8 * scale);
-    };
+    let previousTime = performance.now();
     const render = (time) => {
-      const motion = (time / 19) % 180;
-      context.fillStyle = '#86bde5';
-      context.fillRect(0, 0, canvas.width, 290);
-      context.fillStyle = '#dceefa';
-      context.fillRect(0, 210, canvas.width, 80);
-      context.fillStyle = '#5a9765';
-      context.fillRect(0, 290, canvas.width, 430);
-      context.fillStyle = '#69829a';
-      context.beginPath();
-      context.moveTo(0, 300); context.lineTo(250, 175); context.lineTo(470, 300);
-      context.lineTo(730, 145); context.lineTo(1020, 300); context.lineTo(1280, 190);
-      context.lineTo(1280, 320); context.lineTo(0, 320); context.closePath(); context.fill();
-      context.fillStyle = '#3e4654';
-      context.beginPath();
-      context.moveTo(490, 290); context.lineTo(790, 290); context.lineTo(1190, 720); context.lineTo(80, 720); context.closePath(); context.fill();
-      context.strokeStyle = '#f4df75';
-      context.lineWidth = 10;
-      context.beginPath(); context.moveTo(495, 294); context.lineTo(84, 720); context.moveTo(785, 294); context.lineTo(1194, 720); context.stroke();
-      context.fillStyle = '#f9f5d0';
-      for (let index = 0; index < 7; index += 1) {
-        const y = 305 + ((index * 110 + motion) % 520);
-        const scale = (y - 280) / 440;
-        const width = 10 + scale * 34;
-        const height = 28 + scale * 100;
-        context.fillRect(640 - width / 2, y, width, height);
-      }
-      drawCar(640 + Math.sin(time / 1800) * 45, 420 + Math.sin(time / 1200) * 8, 0.62, '#4b88c8');
-      drawCar(470 + Math.sin(time / 1450) * 24, 353, 0.28, '#d69b4b');
-      context.fillStyle = '#0a1220cc';
-      context.fillRect(18, 18, 212, 38);
-      context.fillStyle = '#f1f7ff';
-      context.font = '20px system-ui';
-      context.fillText('SIMULATION DRIVE  •  48 km/h', 30, 44);
+      const delta = Math.min(42, time - previousTime);
+      previousTime = time;
+      laneMarkers.forEach((marker) => {
+        marker.position.z += delta * 0.045;
+        if (marker.position.z > 8) marker.position.z -= 130;
+      });
+      traffic.forEach((vehicle, index) => {
+        vehicle.car.position.z += delta * vehicle.speed;
+        vehicle.car.position.x = vehicle.lane + Math.sin(time / (1400 + index * 230)) * 0.12;
+        if (vehicle.car.position.z > 8) vehicle.car.position.z = vehicle.start;
+      });
+      renderer.render(scene, camera);
       if (active) frameId = requestAnimationFrame(render);
     };
     frameId = requestAnimationFrame(render);
@@ -860,6 +888,12 @@ function Encoder({ notify }) {
         active = false;
         cancelAnimationFrame(frameId);
         stream.getTracks().forEach((track) => track.stop());
+        scene.traverse((object) => {
+          object.geometry?.dispose();
+          const materials = Array.isArray(object.material) ? object.material : [object.material];
+          materials.forEach((material) => material?.dispose());
+        });
+        renderer.dispose();
       },
     };
     return stream;
