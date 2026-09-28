@@ -827,7 +827,21 @@ function Encoder({ notify }) {
       const edge = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.03, 180), edgeMaterial);
       edge.position.set(x, 0.1, -62);
       scene.add(edge);
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.38, 180), new THREE.MeshLambertMaterial({ color: '#a9b3bd' }));
+      rail.position.set(x * 1.22, 0.42, -62);
+      scene.add(rail);
     });
+    for (let index = 0; index < 20; index += 1) {
+      [-1, 1].forEach((side) => {
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.16, 1.3, 8), new THREE.MeshLambertMaterial({ color: '#714f31' }));
+        const crown = new THREE.Mesh(new THREE.ConeGeometry(0.86, 2.2, 9), new THREE.MeshLambertMaterial({ color: index % 2 ? '#2f7041' : '#3e844c' }));
+        crown.position.y = 1.85;
+        tree.add(trunk, crown);
+        tree.position.set(side * (9.5 + (index % 3) * 2.3), 0.65, -index * 9 - 12);
+        scene.add(tree);
+      });
+    }
     const laneMarkers = Array.from({ length: 10 }, (_, index) => {
       const marker = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.035, 5.8), new THREE.MeshBasicMaterial({ color: '#fff7cf' }));
       marker.position.set(0, 0.11, -index * 13 - 4);
@@ -842,6 +856,10 @@ function Encoder({ notify }) {
       const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.58, 1.85), new THREE.MeshLambertMaterial({ color: '#b8d6e6' }));
       cabin.position.set(0, 1.1, -0.25);
       car.add(cabin);
+      const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.26, 0.34, 0.05), new THREE.MeshLambertMaterial({ color: '#5d839b' }));
+      rearGlass.rotation.x = -0.43;
+      rearGlass.position.set(0, 1.08, 0.71);
+      car.add(rearGlass);
       const bumper = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.18, 0.28), new THREE.MeshLambertMaterial({ color: '#151b27' }));
       bumper.position.set(0, 0.34, 1.72);
       car.add(bumper);
@@ -854,11 +872,16 @@ function Encoder({ notify }) {
       const lamps = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.16, 0.08), new THREE.MeshBasicMaterial({ color: '#ff7373' }));
       lamps.position.set(0, 0.58, 1.84);
       car.add(lamps);
+      [-0.42, 0.42].forEach((x) => {
+        const lamp = new THREE.PointLight('#ff6262', 1.1, 6);
+        lamp.position.set(x, 0.62, 1.9);
+        car.add(lamp);
+      });
       scene.add(car);
       return car;
     };
     const traffic = [
-      { car: makeCar('#347ab5'), lane: 0, start: -32, speed: 0.035 },
+      { car: makeCar('#347ab5'), lane: 0, start: -32, speed: 0.035, changing: true },
       { car: makeCar('#d77a3e'), lane: -3.05, start: -52, speed: 0.024 },
       { car: makeCar('#d9dce0'), lane: 3.05, start: -76, speed: 0.019 },
     ];
@@ -875,9 +898,24 @@ function Encoder({ notify }) {
       });
       traffic.forEach((vehicle, index) => {
         vehicle.car.position.z += delta * vehicle.speed;
-        vehicle.car.position.x = vehicle.lane + Math.sin(time / (1400 + index * 230)) * 0.12;
+        if (vehicle.changing) {
+          const cycle = (time % 12000) / 12000;
+          const smooth = (value) => value * value * (3 - 2 * value);
+          const displacement = cycle < 0.2 ? 0
+            : cycle < 0.45 ? smooth((cycle - 0.2) / 0.25)
+              : cycle < 0.7 ? 1
+                : cycle < 0.95 ? 1 - smooth((cycle - 0.7) / 0.25)
+                  : 0;
+          vehicle.car.position.x = 3.05 * displacement;
+          vehicle.car.rotation.y = cycle > 0.2 && cycle < 0.45 ? -0.12 : cycle > 0.7 && cycle < 0.95 ? 0.12 : 0;
+        } else {
+          vehicle.car.position.x = vehicle.lane + Math.sin(time / (1400 + index * 230)) * 0.08;
+        }
         if (vehicle.car.position.z > 8) vehicle.car.position.z = vehicle.start;
       });
+      camera.position.x = Math.sin(time / 2100) * 0.035;
+      camera.position.y = 2.65 + Math.sin(time / 950) * 0.025;
+      camera.lookAt(0, 1, -31);
       renderer.render(scene, camera);
       if (active) frameId = requestAnimationFrame(render);
     };
