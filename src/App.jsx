@@ -1808,6 +1808,10 @@ function AuthGate({ children }) {
     const { data: { subscription } } = subscribeToAuth(setSession);
     return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!session?.user || !supabase) return;
+    supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' });
+  }, [session]);
   async function submit(event) {
     event.preventDefault(); setBusy(true); setMessage('');
     const result = mode === 'sign-in' ? await signInWithPassword(email, password) : await signUp(email, password, displayName || email.split('@')[0]);
