@@ -704,7 +704,7 @@ function Encoder({ notify }) {
     if (segmentTimerRef.current) clearTimeout(segmentTimerRef.current);
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     else streamRef.current?.getTracks().forEach((track) => track.stop());
-    simulationVideoRef.current?.pause();
+    simulationVideoRef.current?.stop?.();
     simulationVideoRef.current = null;
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
@@ -785,7 +785,7 @@ function Encoder({ notify }) {
         beginSegment(stream, source);
       } else {
         stream.getTracks().forEach((track) => track.stop());
-        simulationVideoRef.current?.pause();
+        simulationVideoRef.current?.stop?.();
         simulationVideoRef.current = null;
         recorderRef.current = null;
       }
@@ -797,20 +797,72 @@ function Encoder({ notify }) {
     }, segmentLengthRef.current * 1000);
   }
   async function createSimulationStream() {
-    const source = document.createElement('video');
-    source.src = '/driving-simulation.mp4';
-    source.muted = true;
-    source.loop = true;
-    source.playsInline = true;
-    await new Promise((resolve, reject) => {
-      source.onloadeddata = resolve;
-      source.onerror = () => reject(new Error('The driving simulation video could not be loaded.'));
-    });
-    await source.play();
-    const capture = source.captureStream || source.mozCaptureStream;
-    if (!capture) throw new Error('This browser cannot record the driving simulation. Use Chrome or Edge.');
-    simulationVideoRef.current = source;
-    return capture.call(source);
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280;
+    canvas.height = 720;
+    if (!canvas.captureStream) throw new Error('This browser cannot record the driving simulation. Use Chrome or Edge.');
+    const context = canvas.getContext('2d');
+    let frameId;
+    let active = true;
+    const drawCar = (x, y, scale, color) => {
+      const width = 96 * scale;
+      const height = 132 * scale;
+      context.fillStyle = '#171d2b';
+      context.fillRect(x - width / 2, y - height / 2, width, height);
+      context.fillStyle = color;
+      context.fillRect(x - width / 2 + 7 * scale, y - height / 2 + 8 * scale, width - 14 * scale, height - 24 * scale);
+      context.fillStyle = '#b7d5e8';
+      context.fillRect(x - width * 0.32, y - height * 0.28, width * 0.64, height * 0.24);
+      context.fillStyle = '#f87171';
+      context.fillRect(x - width * 0.34, y + height * 0.27, width * 0.18, 8 * scale);
+      context.fillRect(x + width * 0.16, y + height * 0.27, width * 0.18, 8 * scale);
+    };
+    const render = (time) => {
+      const motion = (time / 19) % 180;
+      context.fillStyle = '#86bde5';
+      context.fillRect(0, 0, canvas.width, 290);
+      context.fillStyle = '#dceefa';
+      context.fillRect(0, 210, canvas.width, 80);
+      context.fillStyle = '#5a9765';
+      context.fillRect(0, 290, canvas.width, 430);
+      context.fillStyle = '#69829a';
+      context.beginPath();
+      context.moveTo(0, 300); context.lineTo(250, 175); context.lineTo(470, 300);
+      context.lineTo(730, 145); context.lineTo(1020, 300); context.lineTo(1280, 190);
+      context.lineTo(1280, 320); context.lineTo(0, 320); context.closePath(); context.fill();
+      context.fillStyle = '#3e4654';
+      context.beginPath();
+      context.moveTo(490, 290); context.lineTo(790, 290); context.lineTo(1190, 720); context.lineTo(80, 720); context.closePath(); context.fill();
+      context.strokeStyle = '#f4df75';
+      context.lineWidth = 10;
+      context.beginPath(); context.moveTo(495, 294); context.lineTo(84, 720); context.moveTo(785, 294); context.lineTo(1194, 720); context.stroke();
+      context.fillStyle = '#f9f5d0';
+      for (let index = 0; index < 7; index += 1) {
+        const y = 305 + ((index * 110 + motion) % 520);
+        const scale = (y - 280) / 440;
+        const width = 10 + scale * 34;
+        const height = 28 + scale * 100;
+        context.fillRect(640 - width / 2, y, width, height);
+      }
+      drawCar(640 + Math.sin(time / 1800) * 45, 420 + Math.sin(time / 1200) * 8, 0.62, '#4b88c8');
+      drawCar(470 + Math.sin(time / 1450) * 24, 353, 0.28, '#d69b4b');
+      context.fillStyle = '#0a1220cc';
+      context.fillRect(18, 18, 212, 38);
+      context.fillStyle = '#f1f7ff';
+      context.font = '20px system-ui';
+      context.fillText('SIMULATION DRIVE  •  48 km/h', 30, 44);
+      if (active) frameId = requestAnimationFrame(render);
+    };
+    frameId = requestAnimationFrame(render);
+    const stream = canvas.captureStream(30);
+    simulationVideoRef.current = {
+      stop: () => {
+        active = false;
+        cancelAnimationFrame(frameId);
+        stream.getTracks().forEach((track) => track.stop());
+      },
+    };
+    return stream;
   }
   async function startDashcam() {
     try {
@@ -835,7 +887,7 @@ function Encoder({ notify }) {
     if (recorderRef.current && recorderRef.current.state !== 'inactive') recorderRef.current.stop();
     else {
       streamRef.current?.getTracks().forEach((track) => track.stop());
-      simulationVideoRef.current?.pause();
+      simulationVideoRef.current?.stop?.();
       simulationVideoRef.current = null;
     }
     setRecording(false);
