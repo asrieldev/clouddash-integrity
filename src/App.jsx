@@ -667,6 +667,12 @@ function Encoder({ notify }) {
     const seconds = setInterval(() => setElapsed((v) => v + 1), 1000);
     return () => clearInterval(seconds);
   }, [recording]);
+  useEffect(() => {
+    if (recording && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  }, [recording]);
   useEffect(() => () => streamRef.current?.getTracks().forEach((track) => track.stop()), []);
   async function prepareIdentity() {
     if (identityRef.current) return identityRef.current;
