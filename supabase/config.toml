@@ -1,0 +1,20 @@
+project_id = "clouddash-integrity"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+
+[db]
+port = 54322
+major_version = 15
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:4173"
+additional_redirect_urls = ["http://localhost:4173"]
+jwt_expiry = 3600
+enable_signup = true
+
+[realtime]
+enabled = true

@@ -24,3 +24,5 @@ The UI opens directly into the Forensics Lab workspace. For the REST API, `POST 
 - Prisma/PostgreSQL schema, Docker Compose deployment scaffold, and seed data.
 
 See [architecture documentation](docs/ARCHITECTURE.md) and [API reference](docs/API.md).
+
+Supabase configuration, RLS, Realtime, and deployment instructions are in [docs/SUPABASE.md](docs/SUPABASE.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
