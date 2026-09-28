@@ -71,7 +71,7 @@ import { auditLogs, incidents, initialVideos, fmt } from "./lib";
 import { getDashboardMetrics } from "./api";
 import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
-import { createEvidenceSegment, sha256 } from "./security/chain";
+import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadQueuedSegment, uploadSegment } from "./evidenceRepository";
 import { enqueueSegment, flushQueue } from "./storage/offlineQueue";
 
@@ -177,19 +177,36 @@ function Layout({ children, alerts, setAlerts }) {
   );
 }
 
-function Monitor({ videos }) {
-  const valid = videos.filter((video) => video.integrity === "Verified").length;
+function Monitor({ videos, notify }) {
+  const [stored, setStored] = useState([]);
+  const records = stored.length ? stored : videos;
+  const reload = async () => {
+    if (!supabase) return;
+    try {
+      const segments = await listEvidenceSegments();
+      setStored(segments.map((segment) => ({
+        id: segment.id,
+        name: segment.object_path.split('/').pop(),
+        captured: new Date(segment.captured_at).toLocaleString(),
+        location: segment.devices?.label || 'Driver dashcam',
+        hash: segment.sha256,
+        integrity: segment.status === 'transmitted' ? 'Verified' : 'Pending',
+      })));
+    } catch (error) { notify(`Could not refresh live evidence: ${error.message}`); }
+  };
+  useEffect(() => { reload(); }, []);
+  const valid = records.filter((video) => video.integrity === "Verified").length;
   return (
     <div className="page monitor-page">
       <SectionHead
         title="Live monitor"
         copy="A concise view of incoming evidence and chain integrity."
-        action={<Badge tone="success"><span className="signal" /> Realtime connected</Badge>}
+        action={<button className="button secondary" onClick={reload}><Activity size={16} /> Refresh</button>}
       />
       <section className="metrics monitor-metrics">
-        <Metric label="Evidence records" value={videos.length} change="Latest 300 records" icon={FileVideo} />
+        <Metric label="Evidence records" value={records.length} change="Stored evidence segments" icon={FileVideo} />
         <Metric label="Chain verified" value={valid} change="Signature and sequence checked" icon={ShieldCheck} tone="green" />
-        <Metric label="Needs review" value={videos.length - valid} change="Analyst attention" icon={AlertTriangle} tone="amber" />
+        <Metric label="Needs review" value={records.length - valid} change="Awaiting upload or review" icon={AlertTriangle} tone="amber" />
         <Metric label="Capture devices" value="1" change="Driver device online" icon={Camera} tone="violet" />
       </section>
       <section className="panel monitor-sessions">
@@ -198,12 +215,12 @@ function Monitor({ videos }) {
           <NavLink className="button secondary" to="/encoder"><Camera size={16} /> Open capture</NavLink>
         </div>
         <div className="table-wrap"><table><thead><tr><th>Evidence</th><th>Captured</th><th>Location</th><th>Integrity</th><th /></tr></thead><tbody>
-          {videos.map((video) => <tr key={video.id}><td><b>{video.id}</b><small>{video.name}</small></td><td>{video.captured}</td><td>{video.location}</td><td><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity}</Badge></td><td><NavLink to="/evidence" className="text-button">Inspect</NavLink></td></tr>)}
+          {records.map((video) => <tr key={video.id}><td><b>{video.id}</b><small>{video.name}</small></td><td>{video.captured}</td><td>{video.location}</td><td><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity}</Badge></td><td><NavLink to="/evidence" className="text-button">Inspect</NavLink></td></tr>)}
         </tbody></table></div>
       </section>
       <section className="panel fingerprint-stream">
         <div className="panel-title"><div><h2>Incoming fingerprints</h2><p>Hashes are checked when a segment reaches the evidence service.</p></div><Badge tone="success">Chain intact</Badge></div>
-        <div className="fingerprint-list">{videos.map((video, index) => <div key={video.hash}><span>#{String(videos.length - index).padStart(2, "0")}</span><b>{video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
+        <div className="fingerprint-list">{records.map((video, index) => <div key={video.hash}><span>#{String(records.length - index).padStart(2, "0")}</span><b>{video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
       </section>
     </div>
   );
@@ -726,13 +743,14 @@ function Encoder({ notify }) {
     if (!device) device = await createDevice(workspaceId);
     const { data: latest, error: sequenceError } = await supabase
       .from('evidence_segments')
-      .select('sequence')
+      .select('sequence, chain_hash')
       .eq('device_id', device.id)
       .order('sequence', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (sequenceError) throw sequenceError;
     nextSequenceRef.current = latest ? latest.sequence + 1 : 0;
+    previousHashRef.current = latest?.chain_hash || null;
     identityRef.current = { workspaceId, deviceId: device.id };
     return identityRef.current;
   }
@@ -1450,120 +1468,52 @@ function Alerts({ alerts, setAlerts, notify }) {
   );
 }
 
-function Integrity({ videos, notify }) {
-  const [tamper, setTamper] = useState(false);
+function Integrity({ notify }) {
+  const [segments, setSegments] = useState([]);
+  const [audits, setAudits] = useState([]);
+  const [running, setRunning] = useState(false);
+  async function runAudit() {
+    if (!supabase) return;
+    setRunning(true);
+    try {
+      const records = await listEvidenceSegments();
+      setSegments(records);
+      const byDevice = records.reduce((groups, segment) => {
+        (groups[segment.device_id] ||= []).push(segment);
+        return groups;
+      }, {});
+      const results = await Promise.all(Object.entries(byDevice).map(async ([deviceId, deviceSegments]) => {
+        const result = await verifyEvidenceChain(deviceSegments.map((segment) => ({
+          sequence: segment.sequence,
+          sha256: segment.sha256,
+          previousHash: segment.previous_hash,
+          chainHash: segment.chain_hash,
+        })));
+        return { deviceId, label: deviceSegments[0].devices?.label || 'Driver dashcam', total: deviceSegments.length, ...result };
+      }));
+      setAudits(results);
+      notify(results.every((result) => result.valid) ? 'Integrity audit completed: all chains are valid.' : 'Integrity audit found a chain mismatch.');
+    } catch (error) {
+      notify(`Could not run integrity audit: ${error.message}`);
+    } finally { setRunning(false); }
+  }
+  useEffect(() => { runAudit(); }, []);
+  const validChains = audits.filter((audit) => audit.valid).length;
   return (
     <div className="page">
-      <SectionHead
-        title="Integrity center"
-        copy="Cryptographic proof and tamper-evident history for every evidence object."
-        action={
-          <button
-            className="button secondary"
-            onClick={() => {
-              setTamper(!tamper);
-              notify(
-                tamper
-                  ? "Ledger state restored"
-                  : "Tamper scenario enabled for demonstration",
-              );
-            }}
-          >
-            <ShieldCheck size={16} />
-            Simulate tamper test
-          </button>
-        }
-      />
+      <SectionHead title="Integrity log" copy="Audit the exact hash chains stored for each driver device." action={<button className="button primary" onClick={runAudit} disabled={running}><ShieldCheck size={16} /> {running ? 'Auditing...' : 'Run audit'}</button>} />
       <section className="metrics">
-        <Metric
-          label="Ledger verifications"
-          value="4,829"
-          change="Today"
-          icon={FileCheck2}
-        />
-        <Metric
-          label="Hash match rate"
-          value={tamper ? "99.7%" : "100%"}
-          change={tamper ? "1 mismatch detected" : "All evidence intact"}
-          icon={ShieldCheck}
-          tone={tamper ? "amber" : "green"}
-        />
-        <Metric
-          label="Mean verification"
-          value="184 ms"
-          change="-12 ms this week"
-          icon={Zap}
-          tone="violet"
-        />
-      </section>
-      <section className="integrity-grid">
-        <article className="panel">
-          <div className="panel-title">
-            <div>
-              <h2>Verification timeline</h2>
-              <p>EV-2026-1842 chain of custody</p>
-            </div>
-            <Badge tone={tamper ? "danger" : "success"}>
-              {tamper ? "Mismatch" : "Verified"}
-            </Badge>
-          </div>
-          <div className="ledger">
-            {[
-              "Ingested object encrypted",
-              "SHA-256 digest committed",
-              "AI analysis result appended",
-              "Analyst verification signed",
-            ].map((x, i) => (
-              <div key={x}>
-                <span className={tamper && i === 2 ? "broken" : ""}>
-                  {tamper && i === 2 ? <X size={14} /> : <Check size={14} />}
-                </span>
-                <div>
-                  <b>{x}</b>
-                  <small>
-                    {["14:12:06", "14:12:07", "14:12:19", "14:24:51"][i]} UTC ·
-                    Immutable log entry
-                  </small>
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-        <article className="panel">
-          <h2>Evidence hash</h2>
-          <p className="muted">Current SHA-256 fingerprint</p>
-          <code className="hash">
-            bf9cae31d2f4a7054d89128f3b98ee...8e51d08a
-          </code>
-          <div className="certificate">
-            <FileCheck2 size={24} />
-            <div>
-              <b>Verification certificate</b>
-              <small>Signed, timestamped and audit-ready.</small>
-            </div>
-            <button className="icon-button" aria-label="Download certificate">
-              <Download size={17} />
-            </button>
-          </div>
-        </article>
+        <Metric label="Stored segments" value={segments.length} change="Evidence records checked" icon={FileVideo} />
+        <Metric label="Valid chains" value={`${validChains}/${audits.length}`} change={audits.length ? 'Device chains verified' : 'No captured chains yet'} icon={ShieldCheck} tone="green" />
+        <Metric label="Chain failures" value={audits.filter((audit) => !audit.valid).length} change="Requires analyst review" icon={AlertTriangle} tone="amber" />
       </section>
       <section className="panel">
-        <div className="panel-title">
-          <div>
-            <h2>Evidence verification log</h2>
-            <p>Most recent cryptographic events</p>
-          </div>
-        </div>
-        <div className="log-list">
-          {auditLogs.map((r) => (
-            <div key={r.join("")}>
-              <span>{r[0]}</span>
-              <b>{r[1]}</b>
-              <p>{r[2]}</p>
-              <code>{r[3]}</code>
-            </div>
-          ))}
-        </div>
+        <div className="panel-title"><div><h2>Device audit results</h2><p>Each result recomputes the sequence and prior-hash link for every stored segment.</p></div></div>
+        {audits.length ? <div className="table-wrap"><table><thead><tr><th>Device</th><th>Segments</th><th>Last chain hash</th><th>Result</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.deviceId}><td><b>{audit.label}</b><small>{audit.deviceId.slice(0, 8)}</small></td><td>{audit.total}</td><td><code>{audit.lastHash?.slice(0, 24) || 'Not available'}...</code></td><td><Badge tone={audit.valid ? 'success' : 'danger'}>{audit.valid ? 'Chain valid' : `Failed at #${audit.failedSequence}`}</Badge></td></tr>)}</tbody></table></div> : <Empty text="No recorded evidence is available to audit yet." />}
+      </section>
+      <section className="panel fingerprint-stream">
+        <div className="panel-title"><div><h2>Hash log</h2><p>Newest segments stored in Supabase.</p></div><Badge tone="info">SHA-256</Badge></div>
+        {segments.length ? <div className="fingerprint-list">{segments.slice(0, 12).map((segment) => <div key={segment.id}><span>#{segment.sequence}</span><b>{segment.devices?.label || 'Driver dashcam'}</b><code>{segment.chain_hash}</code><Badge tone={segment.status === 'transmitted' ? 'success' : 'warning'}>{segment.status}</Badge></div>)}</div> : <Empty text="Record a clip from Driver capture, then run an audit." />}
       </section>
     </div>
   );
@@ -2180,7 +2130,7 @@ function CloudDash() {
           <Route
             path="/"
             element={
-              <Monitor videos={videos} />
+              <Monitor videos={videos} notify={notify} />
             }
           />
           <Route

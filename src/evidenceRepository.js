@@ -38,7 +38,7 @@ export async function listEvidenceSegments() {
   const client = requireSupabase();
   const { data, error } = await client
     .from('evidence_segments')
-    .select('id, sequence, captured_at, object_path, sha256, bytes, status, locked, devices(label)')
+    .select('id, device_id, sequence, captured_at, object_path, sha256, previous_hash, chain_hash, bytes, status, locked, devices(label)')
     .order('captured_at', { ascending: false });
   if (error) throw error;
   return data;
