@@ -9,7 +9,7 @@ import jwt from 'jsonwebtoken';
 import multer from 'multer';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadDir = path.join(__dirname, '..', 'uploads');
+const uploadDir = process.env.VERCEL ? '/tmp/clouddash-uploads' : path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 const app = express(); const secret = process.env.JWT_SECRET || 'change-me-in-production';
 app.use(cors()); app.use(express.json());
