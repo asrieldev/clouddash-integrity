@@ -168,3 +168,5 @@ grant select, insert on public.devices to authenticated;
 grant update (label, active, last_seen_at) on public.devices to authenticated;
 
 alter publication supabase_realtime add table public.incident_videos;
+
+notify pgrst, 'reload schema';
