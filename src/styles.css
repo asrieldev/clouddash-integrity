@@ -1787,7 +1787,7 @@ body, .focused-shell { background: #111214; }
 .app-identity small { color: #9ca0a9; font-size: 9px; letter-spacing: 1.35px; }
 .app-identity strong { color: #f6f7f9; font-size: 16px; font-weight: 700; }
 .side-navigation { gap: 3px; margin-top: 8px; }
-.side-navigation a { min-height: 40px; padding: 0 11px; border-radius: 7px; color: #b4b7bf; font-weight: 560; transition: background-color .16s ease, color .16s ease; }
+.side-navigation a { min-height: 40px; padding: 0 11px; border-radius: 0; color: #b4b7bf; font-weight: 560; transition: background-color .16s ease, color .16s ease; }
 .side-navigation a:hover { background: #22242a; color: #fbfbfc; }
 .side-navigation a.active { background: #244b69; color: #f4f9ff; box-shadow: inset 3px 0 #85c9fb; }
 .side-status { border-color: #303237; color: #afb3bb; }
