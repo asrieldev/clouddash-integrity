@@ -17,13 +17,20 @@ function requiredText(value, name) {
   return value;
 }
 
+function canonicalTimestamp(value) {
+  const timestamp = requiredText(value, 'capturedAt');
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) throw new Error('capturedAt must be a valid timestamp');
+  return parsed.toISOString();
+}
+
 export function canonicalChainPayload(record) {
   return JSON.stringify({
     version: Number(record.version ?? EVIDENCE_VERSION),
     workspaceId: requiredText(record.workspaceId ?? record.workspace_id, 'workspaceId'),
     deviceId: requiredText(record.deviceId ?? record.device_id, 'deviceId'),
     sequence: Number(record.sequence),
-    capturedAt: requiredText(record.capturedAt ?? record.captured_at, 'capturedAt'),
+    capturedAt: canonicalTimestamp(record.capturedAt ?? record.captured_at),
     bytes: Number(record.bytes),
     sha256: requiredText(record.sha256, 'sha256'),
     previousHash: record.previousHash ?? record.previous_hash ?? null
