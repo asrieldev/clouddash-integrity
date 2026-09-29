@@ -51,6 +51,7 @@ import {
   LoaderCircle,
   Lock,
   LockKeyhole,
+  LogOut,
   MapPinned,
   Menu,
   MoreHorizontal,
@@ -70,7 +71,7 @@ import {
 } from "lucide-react";
 import { auditLogs, incidents, initialVideos, fmt } from "./lib";
 import { getDashboardMetrics } from "./api";
-import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
+import { signInWithPassword, signOut, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadQueuedSegment, uploadSegment } from "./evidenceRepository";
@@ -165,8 +166,17 @@ function exportCsv(filename, columns, rows) {
   URL.revokeObjectURL(url);
 }
 
-function Layout({ children, alerts, setAlerts }) {
+function Layout({ children, alerts, setAlerts, session }) {
   const loc = useLocation();
+  const [profileOpen, setProfileOpen] = useState(false);
+  const user = session?.user;
+  const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Demo analyst';
+  const email = user?.email || 'Local demonstration mode';
+  async function handleSignOut() {
+    if (!supabase) return;
+    await signOut();
+    setProfileOpen(false);
+  }
   return (
     <div className="focused-shell">
       <aside className="app-sidepanel">
@@ -185,7 +195,36 @@ function Layout({ children, alerts, setAlerts }) {
             </NavLink>
           ))}
         </nav>
-        <div className="side-status"><span className="side-profile" title="Signed-in analyst"><CircleUserRound size={16} /></span><span className="signal" /> Secure sync</div>
+        <div className="side-status">
+          <div className="profile-control">
+            <button
+              className="side-profile"
+              type="button"
+              onClick={() => setProfileOpen((open) => !open)}
+              aria-expanded={profileOpen}
+              aria-controls="account-panel"
+              aria-label="Open account details"
+              title="Account details"
+            >
+              <CircleUserRound size={16} />
+            </button>
+            {profileOpen && (
+              <section className="account-panel" id="account-panel" aria-label="Account details">
+                <div className="account-panel-head">
+                  <CircleUserRound size={18} />
+                  <div><strong>{displayName}</strong><span>Signed in</span></div>
+                </div>
+                <dl>
+                  <div><dt>Email</dt><dd>{email}</dd></div>
+                  <div><dt>Workspace role</dt><dd>Administrator</dd></div>
+                  <div><dt>Authentication</dt><dd>{supabase ? 'Supabase email login' : 'Local demo mode'}</dd></div>
+                </dl>
+                {supabase && <button className="account-signout" type="button" onClick={handleSignOut}><LogOut size={15} /> Sign out</button>}
+              </section>
+            )}
+          </div>
+          <span className="signal" /> Secure sync
+        </div>
       </aside>
       <main className="focused-main">
         {children}
@@ -2187,13 +2226,13 @@ function AuthGate({ children }) {
     if (mode === 'sign-up' && !result.data.session) setMessage('Check your email to confirm the account, then sign in.');
   }
   if (session === undefined) return <div className="auth-gate"><LoaderCircle className="spin" size={28}/></div>;
-  if (session) return children;
+  if (session) return typeof children === 'function' ? children(session) : children;
   return <main className="auth-gate"><form className="auth-card" onSubmit={submit}><div className="brand-mark"><ShieldCheck size={22}/></div><h1>CloudDash Integrity</h1><p>{mode === 'sign-in' ? 'Sign in to your evidence workspace.' : 'Create an analyst workspace account.'}</p>{mode === 'sign-up' && <label>Name<input required value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name"/></label>}<label>Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><label>Password<input required minLength="6" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 6 characters"/></label>{message && <div className="auth-message">{message}</div>}<button className="button primary full" disabled={busy}>{busy ? 'Please wait...' : mode === 'sign-in' ? 'Sign in' : 'Create account'}</button><button type="button" className="text-button auth-switch" onClick={()=>{setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');setMessage('')}}>{mode === 'sign-in' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button></form></main>;
 }
 
-function App() { return <AuthGate><CloudDash /></AuthGate>; }
+function App() { return <AuthGate>{(session) => <CloudDash session={session} />}</AuthGate>; }
 
-function CloudDash() {
+function CloudDash({ session }) {
   const [videos, setVideos] = useState(initialVideos);
   const [alerts, setAlerts] = useState([
     {
@@ -2237,7 +2276,7 @@ function CloudDash() {
     retry: false,
   });
   return (
-    <Layout alerts={alerts} setAlerts={setAlerts}>
+    <Layout alerts={alerts} setAlerts={setAlerts} session={session}>
       {dashboardQuery.isLoading ? (
         <div className="page">
           <div className="skeleton title" />
