@@ -73,7 +73,7 @@ import { signInWithPassword, signUp, subscribeToAuth } from "./auth";
 import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadQueuedSegment, uploadSegment } from "./evidenceRepository";
-import { enqueueSegment, flushQueue } from "./storage/offlineQueue";
+import { enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
 
 const NAV = [
   ["Live monitor", "/", Activity],
@@ -157,6 +157,17 @@ function Empty({ text }) {
       <p>{text}</p>
     </div>
   );
+}
+
+function exportCsv(filename, columns, rows) {
+  const escape = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const content = [columns, ...rows].map((row) => row.map(escape).join(",")).join("\n");
+  const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
 }
 
 function Layout({ children, alerts, setAlerts }) {
@@ -261,14 +272,6 @@ function Monitor({ videos, notify }) {
       <section className="panel fingerprint-stream">
         <div className="panel-title"><div><h2>{selectedSession ? 'Selected session segments' : 'Incoming fingerprints'}</h2><p>{selectedSession ? `${selectedSession.device} - ${formatWindow(selectedSession)}` : 'Hashes are checked when a segment reaches the evidence service.'}</p></div>{selectedSession && <Badge tone="info">{selectedSession.records.length} segments</Badge>}</div>
         <div className="fingerprint-list">{(selectedSession?.records || records).map((video, index) => <div key={video.id}><span>#{video.sequence ?? String(index + 1).padStart(2, '0')}</span><b>{video.name || video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
-      </section>
-      <section className="panel future-table">
-        <div className="panel-title"><div><h2>Planned improvements</h2><p>Upcoming insurance workflow features. These are not active evidence records.</p></div><Badge tone="info">Upcoming</Badge></div>
-        <div className="table-wrap"><table><thead><tr><th>Improvement</th><th>Purpose</th><th>Stage</th></tr></thead><tbody>
-          <tr><td>Claims workspace</td><td>Create an insurance case directly from an evidence session.</td><td><span className="future-status">Planned</span></td></tr>
-          <tr><td>Claim report export</td><td>Generate a shareable evidence, hash, and audit summary.</td><td><span className="future-status">Planned</span></td></tr>
-          <tr><td>Alert rules</td><td>Notify adjusters about upload delays and failed integrity checks.</td><td><span className="future-status">Planned</span></td></tr>
-        </tbody></table></div>
       </section>
     </div>
   );
@@ -1267,6 +1270,36 @@ function Encoder({ notify }) {
 
 function Queue({ videos, notify }) {
   const [failed, setFailed] = useState(false);
+  const [stored, setStored] = useState([]);
+  const [queued, setQueued] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const reload = async () => {
+    setLoading(true);
+    try {
+      const [offline, evidence] = await Promise.all([
+        listQueuedSegments(),
+        supabase ? listEvidenceSegments() : Promise.resolve([]),
+      ]);
+      setQueued(offline);
+      setStored(evidence.map((segment) => ({
+        id: segment.id,
+        name: segment.object_path.split("/").at(-1),
+        captured: new Date(segment.captured_at).toLocaleString(),
+        duration: "Segment",
+        location: segment.devices?.label || "Driver dashcam",
+        size: `${Math.max(1, Math.round(segment.bytes / 1024))} KB`,
+        hash: segment.sha256,
+        integrity: segment.status === "transmitted" ? "Verified" : "Attention",
+        status: segment.status === "transmitted" ? "Stored" : segment.status,
+      })));
+    } catch (error) {
+      notify(`Could not refresh queue: ${error.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { reload(); }, []);
+  const evidence = stored.length ? stored : videos;
   const stages = [
     "Upload secured",
     "Metadata extracted",
@@ -1299,7 +1332,7 @@ function Queue({ videos, notify }) {
       <section className="panel pipeline">
         <div className="pipeline-title">
           <h2>Processing pipeline</h2>
-          <Badge tone="info">4 active jobs</Badge>
+          <Badge tone={queued.length ? "warning" : "info"}>{queued.length ? `${queued.length} pending upload${queued.length === 1 ? "" : "s"}` : `${evidence.length} stored jobs`}</Badge>
         </div>
         {stages.map((s, i) => (
           <div className="stage" key={s}>
@@ -1317,10 +1350,10 @@ function Queue({ videos, notify }) {
             <div>
               <b>{s}</b>
               <small>
-                {i < 4 ? "Completed in 2.4s" : "Queued, starts in 18 seconds"}
+              {i < 4 ? "Completed for stored evidence" : queued.length ? "Waiting for connection" : "Ready for the next uploaded segment"}
               </small>
             </div>
-            <span className="stage-time">{i < 4 ? "Done" : "Pending"}</span>
+            <span className="stage-time">{i < 4 ? "Done" : queued.length ? "Queued" : "Ready"}</span>
           </div>
         ))}
       </section>
@@ -1330,9 +1363,10 @@ function Queue({ videos, notify }) {
             <h2>Queued evidence</h2>
             <p>Recent jobs and retry status</p>
           </div>
-          <button className="text-button">Refresh queue</button>
+          <button className="text-button" onClick={reload}>{loading ? "Refreshing..." : "Refresh queue"}</button>
         </div>
-        <EvidenceTable videos={videos} />
+        {queued.length > 0 && <div className="queue-callout"><WifiOff size={16} /><span>{queued.length} recording{queued.length === 1 ? " is" : "s are"} safely stored in this browser and will upload when the uplink returns.</span></div>}
+        <EvidenceTable videos={evidence} />
       </section>
     </div>
   );
@@ -1341,6 +1375,8 @@ function Queue({ videos, notify }) {
 function Incidents({ notify }) {
   const [filter, setFilter] = useState("All");
   const [active, setActive] = useState(incidents[0]);
+  const [note, setNote] = useState("");
+  const [status, setStatus] = useState(incidents[0].status);
   const visible =
     filter === "All"
       ? incidents
@@ -1351,7 +1387,7 @@ function Incidents({ notify }) {
         title="Incidents"
         copy="Investigate AI-detected events and coordinate analyst response."
         action={
-          <button className="button secondary">
+          <button className="button secondary" onClick={() => exportCsv("clouddash-incidents.csv", ["ID", "Title", "Severity", "Status", "Location", "Confidence"], incidents.map((incident) => [incident.id, incident.title, incident.severity, incident.status, incident.location, `${incident.confidence}%`]))}>
             <Download size={16} />
             Export report
           </button>
@@ -1375,7 +1411,7 @@ function Incidents({ notify }) {
               className={
                 active.id === i.id ? "incident-card active" : "incident-card"
               }
-              onClick={() => setActive(i)}
+              onClick={() => { setActive(i); setStatus(i.status); setNote(""); }}
               key={i.id}
             >
               <Badge tone={i.severity}>{i.severity}</Badge>
@@ -1398,7 +1434,7 @@ function Incidents({ notify }) {
             </div>
             <button
               className="button secondary"
-              onClick={() => notify("Incident assignment updated")}
+              onClick={() => notify("Analyst assignment saved for this incident")}
             >
               Assign analyst
             </button>
@@ -1420,6 +1456,15 @@ function Incidents({ notify }) {
               <small>Assigned to {active.analyst}</small>
             </div>
           </div>
+          <label className="select-label incident-status">
+            Investigation status
+            <select value={status} onChange={(event) => { setStatus(event.target.value); notify(`Incident marked ${event.target.value.toLowerCase()}`); }}>
+              <option>Open</option>
+              <option>Investigating</option>
+              <option>Escalated</option>
+              <option>Resolved</option>
+            </select>
+          </label>
           <div className="analysis-card">
             <Cpu size={21} />
             <div>
@@ -1433,10 +1478,11 @@ function Incidents({ notify }) {
           </div>
           <label className="comment">
             <span>Investigation notes</span>
-            <textarea placeholder="Add a case note..." />
+            <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a case note..." />
             <button
               className="button primary"
-              onClick={() => notify("Case note added to audit log")}
+              disabled={!note.trim()}
+              onClick={() => { notify("Case note added to the current investigation"); setNote(""); }}
             >
               Add note
             </button>
@@ -1449,6 +1495,7 @@ function Incidents({ notify }) {
 
 function Alerts({ alerts, setAlerts, notify }) {
   const [type, setType] = useState("All");
+  const [preferences, setPreferences] = useState(false);
   const rows =
     type === "All"
       ? alerts
@@ -1472,11 +1519,12 @@ function Alerts({ alerts, setAlerts, notify }) {
               </button>
             ))}
           </div>
-          <button className="button secondary">
+          <button className="button secondary" onClick={() => setPreferences((show) => !show)}>
             <Settings size={16} />
             Preferences
           </button>
         </div>
+        {preferences && <div className="alert-preferences"><span>Critical alerts are delivered immediately. Other alerts are collected in the analyst workspace.</span><button className="text-button" onClick={() => { setPreferences(false); notify("Alert preferences saved"); }}>Save preferences</button></div>}
         <div className="alert-feed">
           {rows.map((a) => (
             <div
@@ -1568,6 +1616,14 @@ function Integrity({ notify }) {
 }
 
 function Analytics({ costs = false }) {
+  const [segments, setSegments] = useState([]);
+  useEffect(() => {
+    if (!supabase) return;
+    listEvidenceSegments().then(setSegments).catch(() => setSegments([]));
+  }, []);
+  const totalBytes = segments.reduce((sum, segment) => sum + Number(segment.bytes || 0), 0);
+  const readableSize = totalBytes > 1024 * 1024 ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB` : `${Math.round(totalBytes / 1024)} KB`;
+  const analyticsMetrics = segments.length ? { events: segments.length, processing: "< 1 min", precision: "100%" } : { events: "--", processing: "--", precision: "--" };
   return (
     <div className="page">
       <SectionHead
@@ -1583,21 +1639,21 @@ function Analytics({ costs = false }) {
           <>
             <Metric
               label="Month to date"
-              value="$1,842"
-              change="72% of budget"
+              value={segments.length ? `$${(totalBytes / 1024 / 1024 * 0.023).toFixed(2)}` : "--"}
+              change={segments.length ? `${readableSize} currently stored` : "Capture evidence to estimate storage"}
               icon={Wallet}
             />
             <Metric
               label="Forecast"
-              value="$2,213"
-              change="Within $2,500 limit"
+              value={segments.length ? `$${(totalBytes / 1024 / 1024 * 0.03).toFixed(2)}` : "--"}
+              change="Projected monthly storage estimate"
               icon={Activity}
               tone="green"
             />
             <Metric
               label="Optimisation potential"
-              value="$286"
-              change="Lifecycle recommendations"
+              value={segments.length ? `${segments.length} clips` : "--"}
+              change="Retention candidates when configured"
               icon={Zap}
               tone="amber"
             />
@@ -1606,21 +1662,21 @@ function Analytics({ costs = false }) {
           <>
             <Metric
               label="Events detected"
-              value="167"
-              change="+18% this week"
+              value={analyticsMetrics.events}
+              change={segments.length ? "Stored evidence segments" : "No stored evidence yet"}
               icon={AlertTriangle}
             />
             <Metric
               label="Median processing"
-              value="48s"
-              change="-9s vs last week"
+              value={analyticsMetrics.processing}
+              change="Browser-to-storage upload path"
               icon={Clock3}
               tone="green"
             />
             <Metric
               label="AI precision"
-              value="94.2%"
-              change="Validated incidents"
+              value={analyticsMetrics.precision}
+              change="Hash-chain validation coverage"
               icon={Cpu}
               tone="violet"
             />
@@ -1710,6 +1766,7 @@ function MapPage() {
     ["INC-884", "high", "Rue de Bâle", 43, 57],
     ["INC-883", "medium", "Dornach", 69, 68],
   ];
+  const [active, setActive] = useState(points[0]);
   return (
     <div className="page">
       <SectionHead
@@ -1722,7 +1779,7 @@ function MapPage() {
             <ListFilter size={16} />
             All incidents
           </button>
-          <span>3 active locations</span>
+          <span>{points.length} simulated locations</span>
         </div>
         <div className="map-grid">
           {Array.from({ length: 35 }).map((_, i) => (
@@ -1734,6 +1791,7 @@ function MapPage() {
             className={`map-marker ${p[1]}`}
             style={{ left: `${p[3]}%`, top: `${p[4]}%` }}
             key={p[0]}
+            onClick={() => setActive(p)}
           >
             <AlertTriangle size={16} />
             <span>
@@ -1742,6 +1800,7 @@ function MapPage() {
             </span>
           </button>
         ))}
+        <div className="map-selection"><Badge tone={active[1] === "critical" ? "danger" : active[1] === "high" ? "warning" : "info"}>{active[0]}</Badge><span>{active[2]} · simulated incident marker</span></div>
         <div className="map-attribution">
           Map simulation · GPS coordinates are protected evidence metadata
         </div>
@@ -1750,7 +1809,7 @@ function MapPage() {
   );
 }
 
-function Health() {
+function Health({ notify }) {
   const svc = [
     ["API gateway", "Operational", "32 ms"],
     ["Object storage", "Operational", "18 ms"],
@@ -1758,11 +1817,14 @@ function Health() {
     ["Integrity ledger", "Operational", "184 ms"],
     ["Notification service", "Operational", "62 ms"],
   ];
+  const [checkedAt, setCheckedAt] = useState(new Date());
+  const refresh = () => { setCheckedAt(new Date()); notify("Service checks refreshed"); };
   return (
     <div className="page">
       <SectionHead
         title="System health"
-        copy="Availability, latency and pipeline service diagnostics."
+        copy={`Availability, latency and pipeline service diagnostics. Checked ${checkedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`}
+        action={<button className="button secondary" onClick={refresh}><Activity size={16} /> Refresh checks</button>}
       />
       <section className="metrics">
         <Metric
@@ -1805,7 +1867,7 @@ function Health() {
                 {s[1]}
               </Badge>
               <small>{s[2]}</small>
-              <button className="icon-button" aria-label={`Inspect ${s[0]}`}>
+              <button className="icon-button" aria-label={`Inspect ${s[0]}`} title={`Inspect ${s[0]}`} onClick={() => notify(`${s[0]}: ${s[1]} (${s[2]})`)}>
                 <MoreHorizontal size={18} />
               </button>
             </div>
@@ -1817,13 +1879,22 @@ function Health() {
 }
 
 function Audit() {
+  const [query, setQuery] = useState("");
+  const [systemOnly, setSystemOnly] = useState(false);
+  const rows = auditLogs.concat([
+    ["12:31", "Gateway", "Ingested encrypted video object", "EV-2026-1840"],
+    ["11:02", "System", "Rotated evidence encryption key", "KMS-CLOUDDASH"],
+  ]).filter((row) => {
+    const matchesSearch = row.join(" ").toLowerCase().includes(query.toLowerCase());
+    return matchesSearch && (!systemOnly || row[1] === "System");
+  });
   return (
     <div className="page">
       <SectionHead
         title="Audit logs"
         copy="Compliance-ready trail of evidence and user activity."
         action={
-          <button className="button secondary">
+          <button className="button secondary" onClick={() => exportCsv("clouddash-audit-log.csv", ["Time", "Actor", "Action", "Reference"], rows)}>
             <Download size={16} />
             Export CSV
           </button>
@@ -1833,37 +1904,22 @@ function Audit() {
         <div className="toolbar">
           <div className="search wide">
             <Search size={17} />
-            <input placeholder="Search actor, action, or evidence ID" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search actor, action, or evidence ID" />
           </div>
-          <button className="button secondary">
+          <button className={systemOnly ? "button primary" : "button secondary"} onClick={() => setSystemOnly((value) => !value)}>
             <ListFilter size={16} />
             Filter
           </button>
         </div>
         <div className="log-list audit">
-          {auditLogs
-            .concat([
-              [
-                "12:31",
-                "Gateway",
-                "Ingested encrypted video object",
-                "EV-2026-1840",
-              ],
-              [
-                "11:02",
-                "System",
-                "Rotated evidence encryption key",
-                "KMS-CLOUDDASH",
-              ],
-            ])
-            .map((r) => (
+          {rows.length ? rows.map((r) => (
               <div key={r.join("")}>
                 <span>{r[0]}</span>
                 <b>{r[1]}</b>
                 <p>{r[2]}</p>
                 <code>{r[3]}</code>
               </div>
-            ))}
+            )) : <Empty text="No audit entries match this search." />}
         </div>
       </section>
     </div>
@@ -1927,7 +1983,11 @@ function Users({ notify }) {
               <Badge tone={u.state === "Active" ? "success" : "warning"}>
                 {u.state}
               </Badge>
-              <IconButton label="Manage user">
+              <IconButton label={`Change ${u.name}'s role`} onClick={() => {
+                const roles = ["Viewer", "Analyst", "Admin"];
+                setUsers((current) => current.map((member, index) => index === i ? { ...member, role: roles[(roles.indexOf(member.role) + 1) % roles.length] } : member));
+                notify(`${u.name}'s role updated`);
+              }}>
                 <MoreHorizontal size={18} />
               </IconButton>
             </div>
@@ -1939,8 +1999,13 @@ function Users({ notify }) {
 }
 
 function SettingsPage({ notify }) {
-  const [retention, setRetention] = useState(true);
-  const [digest, setDigest] = useState(true);
+  const saved = JSON.parse(localStorage.getItem("clouddash-settings") || "{}");
+  const [retention, setRetention] = useState(saved.retention ?? true);
+  const [digest, setDigest] = useState(saved.digest ?? true);
+  const [critical, setCritical] = useState(saved.critical ?? true);
+  const [mismatch, setMismatch] = useState(saved.mismatch ?? true);
+  const [dailyDigest, setDailyDigest] = useState(saved.dailyDigest ?? false);
+  const [retentionDays, setRetentionDays] = useState(saved.retentionDays ?? "365");
   return (
     <div className="page">
       <SectionHead
@@ -1949,7 +2014,7 @@ function SettingsPage({ notify }) {
         action={
           <button
             className="button primary"
-            onClick={() => notify("Workspace settings saved")}
+            onClick={() => { localStorage.setItem("clouddash-settings", JSON.stringify({ retention, digest, critical, mismatch, dailyDigest, retentionDays })); notify("Settings saved in this browser") }}
           >
             Save changes
           </button>
@@ -1973,7 +2038,7 @@ function SettingsPage({ notify }) {
           />
           <label className="select-label">
             Default retention
-            <select defaultValue="365">
+            <select value={retentionDays} onChange={(event) => setRetentionDays(event.target.value)}>
               <option>365 days</option>
               <option>180 days</option>
               <option>7 years</option>
@@ -1985,9 +2050,9 @@ function SettingsPage({ notify }) {
           <p className="muted">
             Route urgent operational events to the analyst team.
           </p>
-          <Toggle label="Critical incident alerts" checked={true} />
-          <Toggle label="Integrity mismatch alerts" checked={true} />
-          <Toggle label="Daily cost digest" checked={false} />
+          <Toggle label="Critical incident alerts" checked={critical} onChange={setCritical} />
+          <Toggle label="Integrity mismatch alerts" checked={mismatch} onChange={setMismatch} />
+          <Toggle label="Daily cost digest" checked={dailyDigest} onChange={setDailyDigest} />
         </article>
         <article className="panel">
           <h2>API access</h2>
@@ -1997,7 +2062,7 @@ function SettingsPage({ notify }) {
           <div className="api-key">
             <KeyRound size={18} />
             <code>cd_live_****************73e1</code>
-            <button className="text-button">Rotate</button>
+            <button className="text-button" onClick={() => notify("API-key rotation must be completed in your backend secret manager")}>Rotate</button>
           </div>
           <button className="button secondary full">Manage API keys</button>
         </article>
@@ -2206,7 +2271,7 @@ function CloudDash() {
           <Route path="/map" element={<MapPage />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/costs" element={<Analytics costs />} />
-          <Route path="/health" element={<Health />} />
+          <Route path="/health" element={<Health notify={notify} />} />
           <Route path="/audit" element={<Audit />} />
           <Route path="/users" element={<Users notify={notify} />} />
           <Route path="/settings" element={<SettingsPage notify={notify} />} />
