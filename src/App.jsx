@@ -78,8 +78,8 @@ import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { getOrCreateDeviceKeyPair, getStoredDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from "./security/deviceKeys";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments } from "./evidenceRepository";
-import { enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
-import { canDeleteLocalVideo, deleteLocalVideo, getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
+import { clearQueuedSegments, enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
+import { canDeleteLocalVideo, clearLocalVideos, deleteLocalVideo, getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
 import { createEvidenceManifest, parseEvidenceManifest, parseFingerprintFile } from "./security/fingerprintFile";
 import { compareVideoHash, verifyTrustedFingerprint } from "./security/verification";
 import { createCaptureSession, createIncident, downloadIncidentVideo, endCaptureSession, listFingerprints, listIncidentVideos, storeFingerprint, uploadIncidentVideo } from "./fingerprintRepository";
@@ -1097,6 +1097,23 @@ function Encoder({ notify }) {
     notify(`${removable.length} local video${removable.length === 1 ? '' : 's'} deleted. Trusted cloud fingerprints were retained.`);
   }
 
+  async function clearDeviceStorage() {
+    if (recording) return;
+    const identity = await prepareIdentity();
+    if (!window.confirm('Clear every local video and outbox item for this device? Cloud records and the device signing key will remain.')) return;
+    const [videosRemoved, queueRemoved] = await Promise.all([
+      clearLocalVideos(identity.deviceId),
+      clearQueuedSegments(identity.deviceId)
+    ]);
+    if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
+    lastClipUrlRef.current = null;
+    setLastClip(null);
+    setSelectedSegmentIds([]);
+    setActiveSessionId(null);
+    await refreshLocalEvidence(identity.deviceId);
+    notify(`Local storage cleared: ${videosRemoved} video${videosRemoved === 1 ? '' : 's'} and ${queueRemoved} outbox item${queueRemoved === 1 ? '' : 's'} removed.`);
+  }
+
   async function downloadLocalClip(segment) {
     const record = segment.blob ? segment : await getLocalVideo(segment.id);
     if (!record?.blob) return notify('The local video is no longer available.');
@@ -1567,6 +1584,7 @@ function Encoder({ notify }) {
           <div className="section-actions">
             <span className="storage">Browser storage: {(storedBytes / 1024 / 1024).toFixed(1)} MB used</span>
             <button className="button danger" disabled={!selectedSegmentIds.length} onClick={deleteSelectedLocalVideos}><Trash2 size={16} /> Delete selected</button>
+            <button className="button secondary" disabled={recording || (!segments.length && !outbox.length)} onClick={clearDeviceStorage}><Archive size={16} /> Clear local storage</button>
           </div>
         </div>
         <div className="table-wrap">

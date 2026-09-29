@@ -97,6 +97,12 @@ export async function listQueuedSegments(deviceId) {
   return normalizeQueuedSegments(records, deviceId);
 }
 
+export async function clearQueuedSegments(deviceId) {
+  const queued = await listQueuedSegments(deviceId);
+  await Promise.all(queued.map(item => remove(item.id)));
+  return queued.length;
+}
+
 export async function flushQueue(upload, onChange = () => {}, deviceId) {
   const queued = await listQueuedSegments(deviceId);
   const retryable = queued.filter(item => item.errorCode !== 'EVIDENCE_IDENTITY_CONFLICT');

@@ -51,6 +51,12 @@ export function deleteLocalVideo(id) {
   return transact('readwrite', store => store.delete(id));
 }
 
+export async function clearLocalVideos(deviceId) {
+  const records = await listLocalVideos(deviceId);
+  await Promise.all(records.map(record => deleteLocalVideo(record.id)));
+  return records.length;
+}
+
 export function canDeleteLocalVideo(record) {
   return Boolean(record) && !record.locked && record.state === 'SENT';
 }
