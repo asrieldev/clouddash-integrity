@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
   NavLink,
@@ -1884,9 +1884,46 @@ function Decoder({ notify }) {
   const [videoResult, setVideoResult] = useState(null);
   const [realtimeState, setRealtimeState] = useState('CONNECTING');
   const [cloudPlayback, setCloudPlayback] = useState(null);
-  const [expectedFingerprintId, setExpectedFingerprintId] = useState('');
+  const [incidentChecks, setIncidentChecks] = useState({});
   const inputRef = useRef(null);
   const videoInputRef = useRef(null);
+  const incidentGroups = useMemo(() => Object.values(incidentVideos.reduce((groups, video) => {
+    const id = video.incident_id || video.id;
+    (groups[id] ||= { id, videos: [] }).videos.push(video);
+    return groups;
+  }, {})).map(group => ({
+    ...group,
+    videos: group.videos.sort((a, b) => a.sequence - b.sequence)
+  })), [incidentVideos]);
+  async function inspectIncidentVideo(video, records) {
+    const blob = await downloadIncidentVideo(video.storage_path);
+    const observedHash = await sha256(new Uint8Array(await blob.arrayBuffer()));
+    const reference = records.find(record => record.id === video.fingerprint_id);
+    const hashCheck = compareVideoHash(observedHash, reference?.sha256);
+    const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, records) : hashCheck;
+    return {
+      blob,
+      observedHash,
+      reference,
+      status: hashCheck.valid ? trust.status : hashCheck.status,
+      hashMatches: hashCheck.valid,
+      signatureValid: trust.signatureValid,
+      chain: trust.chain,
+      reason: trust.reason
+    };
+  }
+  async function verifyIncidentRows(videos, records) {
+    setIncidentChecks(Object.fromEntries(videos.map(video => [video.id, { status: 'CHECKING' }])));
+    const checks = await Promise.all(videos.map(async video => {
+      try {
+        const { blob: _blob, ...check } = await inspectIncidentVideo(video, records);
+        return [video.id, check];
+      } catch (error) {
+        return [video.id, { status: 'ERROR', hashMatches: false, signatureValid: false, reason: error.message }];
+      }
+    }));
+    setIncidentChecks(Object.fromEntries(checks));
+  }
   async function reload() {
     if (!supabase) return;
     try {
@@ -1894,8 +1931,9 @@ function Decoder({ notify }) {
       if (error) throw error;
       const records = await listFingerprints(workspaceId);
       setFingerprints(records);
-      setExpectedFingerprintId(current => current || records.at(-1)?.id || '');
-      setIncidentVideos(await listIncidentVideos(workspaceId));
+      const videos = await listIncidentVideos(workspaceId);
+      setIncidentVideos(videos);
+      void verifyIncidentRows(videos, records);
     } catch (error) { notify(`Could not retrieve cloud fingerprints: ${error.message}`); }
   }
   useEffect(() => { reload(); }, []);
@@ -1931,10 +1969,7 @@ function Decoder({ notify }) {
     setChecking(true);
     try {
       const observedHash = await sha256(new Uint8Array(await file.arrayBuffer()));
-      const sequenceMatch = file.name.match(/(?:local-|\/)(\d+)\.(?:webm|mp4)$/i) || file.name.match(/-(\d+)\.(?:webm|mp4)$/i);
-      const expected = (sequenceMatch ? fingerprints.find(record => record.sequence === Number(sequenceMatch[1])) : null)
-        || fingerprints.find(record => record.id === expectedFingerprintId);
-      const reference = fingerprints.find((record) => record.sha256 === observedHash) || expected;
+      const reference = fingerprints.find((record) => record.sha256 === observedHash);
       const hashCheck = compareVideoHash(observedHash, reference?.sha256);
       const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, fingerprints) : hashCheck;
       const status = hashCheck.valid ? trust.status : hashCheck.status;
@@ -1955,18 +1990,15 @@ function Decoder({ notify }) {
   async function openCloudIncident(video, verifyOnly = false) {
     setChecking(true);
     try {
-      const blob = await downloadIncidentVideo(video.storage_path);
-      const observedHash = await sha256(new Uint8Array(await blob.arrayBuffer()));
-      const reference = fingerprints.find(record => record.id === video.fingerprint_id);
-      const hashCheck = compareVideoHash(observedHash, reference?.sha256);
-      const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, fingerprints) : hashCheck;
-      const status = hashCheck.valid ? trust.status : hashCheck.status;
-      setVideoResult({ name: video.storage_path.split('/').at(-1), observedHash, status, reference, signatureValid: trust.signatureValid, chain: trust.chain, reason: trust.reason });
+      const check = await inspectIncidentVideo(video, fingerprints);
+      const { blob, ...storedCheck } = check;
+      setIncidentChecks(current => ({ ...current, [video.id]: storedCheck }));
+      setVideoResult({ name: video.storage_path.split('/').at(-1), ...storedCheck });
       if (!verifyOnly) {
         if (cloudPlayback?.url) URL.revokeObjectURL(cloudPlayback.url);
         setCloudPlayback({ url: URL.createObjectURL(blob), name: video.storage_path.split('/').at(-1) });
       }
-      notify(status === 'VERIFIED' ? 'Cloud incident video passed hash, signature, and chain verification.' : `${status}: incident verification failed.`);
+      notify(check.status === 'VERIFIED' ? 'Cloud incident video passed hash, signature, and chain verification.' : `${check.status}: incident verification failed.`);
     } catch (error) { notify(`Could not retrieve incident video: ${error.message}`); }
     finally { setChecking(false); }
   }
@@ -2000,10 +2032,9 @@ function Decoder({ notify }) {
           {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} values exist in the trusted cloud stream.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
           <div className="decoder-verifier">
             <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select the original local recording. CloudDash hashes its bytes in this browser and compares the result with Supabase; the video is never uploaded.</p>
-            <label>Expected trusted fingerprint<select value={expectedFingerprintId} onChange={(event) => setExpectedFingerprintId(event.target.value)}>{fingerprints.slice().reverse().map(record => <option key={record.id} value={record.id}>#{record.sequence} · {record.devices?.label || record.device_id.slice(0, 8)} · {new Date(record.captured_at).toLocaleString()}</option>)}</select></label>
             <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
             <button className="button secondary" disabled={checking} onClick={() => videoInputRef.current?.click()}><FileVideo size={16} /> {checking ? 'Checking...' : 'Open video file'}</button>
-            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status}</b><span>{videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
+            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'MATCH' : 'MISMATCH'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
           </div>
         </article>
         <article className="panel fingerprint-stream">
@@ -2013,7 +2044,33 @@ function Decoder({ notify }) {
       </section>
       <section className="panel segment-table">
         <div className="panel-title"><div><h2>Protected incident videos</h2><p>Only driver-locked evidence is copied to private Supabase Storage.</p></div><Badge tone="neutral">Private</Badge></div>
-        {incidentVideos.length ? <div className="table-wrap"><table><thead><tr><th>Sequence</th><th>Captured</th><th>Size</th><th>SHA-256</th><th>Actions</th></tr></thead><tbody>{incidentVideos.map(video => <tr key={video.id}><td>#{video.sequence}</td><td>{new Date(video.captured_at).toLocaleString()}</td><td>{Math.max(1, Math.round(video.bytes / 1024))} KB</td><td><code>{video.sha256.slice(0, 16)}...</code></td><td><div className="row-actions"><IconButton label="Play incident video" onClick={() => openCloudIncident(video)}><Play size={16}/></IconButton><IconButton label="Verify incident video" onClick={() => openCloudIncident(video, true)}><ShieldCheck size={16}/></IconButton><IconButton label="Download incident video" onClick={() => downloadCloudIncident(video)}><Download size={16}/></IconButton></div></td></tr>)}</tbody></table></div> : <Empty text="No locked incident videos are stored in the cloud." />}
+        {incidentGroups.length ? <div className="table-wrap incident-evidence-table"><table><thead><tr><th>Evidence</th><th>Device / sequence</th><th>Custody timestamps</th><th>Size</th><th>Hash comparison</th><th>Cryptographic checks</th><th>Result</th><th>Actions</th></tr></thead><tbody>{incidentGroups.map(group => {
+          const groupChecks = group.videos.map(video => incidentChecks[video.id]);
+          const groupFinished = groupChecks.every(check => check && check.status !== 'CHECKING');
+          const groupVerified = groupFinished && groupChecks.every(check => check.status === 'VERIFIED');
+          const firstCapture = new Date(group.videos[0].captured_at);
+          const lastCapture = new Date(group.videos.at(-1).captured_at);
+          const totalBytes = group.videos.reduce((total, video) => total + Number(video.bytes || 0), 0);
+          return <Fragment key={group.id}>
+            <tr className="incident-group-row"><td colSpan="8"><div><span><b>Incident {group.id.slice(0, 8)}</b><small>{group.videos.length} segments · #{group.videos[0].sequence}-#{group.videos.at(-1).sequence} · {firstCapture.toLocaleTimeString()}-{lastCapture.toLocaleTimeString()} · {Math.max(1, Math.round(totalBytes / 1024))} KB</small></span><Badge tone={groupVerified ? 'success' : groupFinished ? 'danger' : 'neutral'}>{groupVerified ? 'ALL MATCH' : groupFinished ? 'MISMATCH FOUND' : 'CHECKING'}</Badge></div></td></tr>
+            {group.videos.map(video => {
+              const check = incidentChecks[video.id];
+              const reference = check?.reference || fingerprints.find(record => record.id === video.fingerprint_id);
+              const verified = check?.status === 'VERIFIED';
+              const finished = check && check.status !== 'CHECKING';
+              return <tr key={video.id}>
+                <td><b>{video.storage_path.split('/').at(-1)}</b><small>{reference?.source || 'Locked incident video'}</small></td>
+                <td><b>{video.devices?.label || 'Driver dashcam'} · #{video.sequence}</b><small>{video.device_id}</small></td>
+                <td><span>Captured {new Date(video.captured_at).toLocaleString()}</span><small>Received {reference ? new Date(reference.received_at || reference.created_at).toLocaleString() : 'Not found'}</small></td>
+                <td>{Math.max(1, Math.round(video.bytes / 1024))} KB<small>{video.mime_type}</small></td>
+                <td><span>Trusted <code title={reference?.sha256 || video.sha256}>{(reference?.sha256 || video.sha256).slice(0, 14)}...</code></span><small>Calculated {check?.observedHash ? <code title={check.observedHash}>{check.observedHash.slice(0, 14)}...</code> : 'Checking...'}</small></td>
+                <td><span>Signature {check?.signatureValid ? 'valid' : finished ? 'invalid' : 'checking'}</span><small>Chain {check?.chain?.valid ? 'valid' : finished ? 'invalid' : 'checking'}</small></td>
+                <td><Badge tone={verified ? 'success' : finished ? 'danger' : 'neutral'}>{verified ? 'MATCH' : finished ? 'MISMATCH' : 'CHECKING'}</Badge><small>{check?.status || 'CHECKING'}</small></td>
+                <td><div className="row-actions"><IconButton label="Play incident video" onClick={() => openCloudIncident(video)}><Play size={16}/></IconButton><IconButton label="Verify incident video again" onClick={() => openCloudIncident(video, true)}><ShieldCheck size={16}/></IconButton><IconButton label="Download incident video" onClick={() => downloadCloudIncident(video)}><Download size={16}/></IconButton></div></td>
+              </tr>;
+            })}
+          </Fragment>;
+        })}</tbody></table></div> : <Empty text="No locked incident videos are stored in the cloud." />}
       </section>
       {cloudPlayback && <div className="video-modal" role="dialog" aria-modal="true"><article className="video-modal-card"><header><b>{cloudPlayback.name}</b><IconButton label="Close video" onClick={() => { URL.revokeObjectURL(cloudPlayback.url); setCloudPlayback(null); }}><X size={18}/></IconButton></header><div className="video-player-stage"><video src={cloudPlayback.url} controls autoPlay playsInline /></div></article></div>}
     </div>

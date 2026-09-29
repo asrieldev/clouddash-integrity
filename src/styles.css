@@ -1822,6 +1822,12 @@ body, .focused-shell { background: #111214; }
 .decoder-result { display: grid; gap: 4px; padding: 11px; border-left: 3px solid #47d795; background: #183126; color: #e7f7ee; font-size: 12px; }
 .decoder-result.mismatch { border-color: #f2b34e; background: #392a16; color: #fff0d5; }
 .decoder-result code { overflow: hidden; color: inherit !important; text-overflow: ellipsis; white-space: nowrap; }
+.incident-evidence-table table { min-width: 1180px; }
+.incident-evidence-table td { vertical-align: top; }
+.incident-evidence-table td code { font-size: 10px; }
+.incident-evidence-table .incident-group-row td { padding: 11px 10px; border-top-color: #46505c; background: #202833; }
+.incident-group-row > td > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.incident-group-row small { display: inline; margin-left: 10px; color: #9aa8b8; }
 @media (max-width: 900px) { .decoder-layout { grid-template-columns: 1fr; } }
 .side-status .signal { background: #36d58b; box-shadow: 0 0 0 3px #143222; }
 .focused-main .page { max-width: 1420px; padding: 34px 32px 54px; }
