@@ -617,22 +617,29 @@ td small {
   align-items: center;
   gap: 12px;
   background: #101b2c;
+  min-height: 116px;
 }
 .upload-zone > svg {
   color: #60a5fa;
 }
+.upload-zone-copy { display: grid; gap: 4px; max-width: 490px; }
+.upload-zone-copy > span { color: #82c9ef; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .upload-zone b {
   font-size: 12px;
   color: #e2e8f0;
 }
 .upload-zone p {
-  font-size: 10px;
+  font-size: 11px;
   color: #94a3b8;
   margin: 4px 0 0;
+  line-height: 1.45;
 }
 .upload-zone .button {
   margin-left: auto;
 }
+.upload-library-stat { display: grid; gap: 2px; min-width: 58px; padding-left: 14px; border-left: 1px solid #384252; text-align: center; }
+.upload-library-stat b { color: #f5f7fa; font-size: 18px; }
+.upload-library-stat span { color: #9da4ae; font-size: 9px; white-space: nowrap; }
 .progress {
   position: relative;
   flex-basis: 100%;

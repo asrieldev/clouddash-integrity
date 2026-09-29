@@ -640,12 +640,14 @@ function Evidence({ videos, setVideos, notify }) {
         <div>
           <article className="panel upload-zone">
             <HardDriveUpload size={25} />
-            <div>
-              <b>Add an evidence clip</b>
-              <p>MP4, MOV, and WebM files are supported.</p>
+            <div className="upload-zone-copy">
+              <span>Evidence intake</span>
+              <b>Open a recording to verify it</b>
+              <p>Add a downloaded MP4, MOV, or WebM clip. CloudDash calculates its SHA-256 fingerprint and checks it against the stored evidence record.</p>
             </div>
+            <div className="upload-library-stat"><b>{storedVideos.length}</b><span>cloud clip{storedVideos.length === 1 ? "" : "s"}</span></div>
             <label className="button secondary">
-              Browse files
+              Choose video
               <input
                 type="file"
                 accept="video/*"
