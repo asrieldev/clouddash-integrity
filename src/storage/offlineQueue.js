@@ -1,38 +1,117 @@
 const DB_NAME = 'clouddash-offline';
 const STORE = 'segments';
+const VERSION = 2;
+
+export const OUTBOX_STATES = Object.freeze({ QUEUED: 'QUEUED', SENDING: 'SENDING', FAILED: 'FAILED' });
 
 function database() {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: 'id' });
+    const request = indexedDB.open(DB_NAME, VERSION);
+    request.onupgradeneeded = () => {
+      const store = request.result.objectStoreNames.contains(STORE)
+        ? request.transaction.objectStore(STORE)
+        : request.result.createObjectStore(STORE, { keyPath: 'id' });
+      if (!store.indexNames.contains('state')) store.createIndex('state', 'state');
+      if (!store.indexNames.contains('deviceId')) store.createIndex('deviceId', 'deviceId');
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
 }
 
-export async function enqueueSegment(segment) {
+function sequenceOf(item) {
+  return Number(item.fingerprint?.sequence ?? item.sequence ?? -1);
+}
+
+export function queueItemId(item) {
+  const fingerprint = item.fingerprint || item;
+  return `${fingerprint.deviceId ?? fingerprint.device_id}:${fingerprint.sequence}`;
+}
+
+export function dedupeQueueItems(items) {
+  const byId = new Map();
+  for (const item of items) byId.set(queueItemId(item), item);
+  return [...byId.values()].sort((a, b) => sequenceOf(a) - sequenceOf(b));
+}
+
+export function allocateNextSequence(cloudSequence = -1, queuedSequence = -1) {
+  return Math.max(Number(cloudSequence ?? -1), Number(queuedSequence ?? -1)) + 1;
+}
+
+async function write(record) {
   const db = await database();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put({ ...segment, id: segment.id || crypto.randomUUID(), queuedAt: new Date().toISOString() });
-    tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+    tx.objectStore(STORE).put(record);
+    tx.oncomplete = () => resolve(record);
+    tx.onerror = () => reject(tx.error);
   });
 }
 
-export async function listQueuedSegments() {
+async function remove(id) {
   const db = await database();
   return new Promise((resolve, reject) => {
-    const request = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
-    request.onsuccess = () => resolve(request.result.sort((a, b) => a.sequence - b.sequence)); request.onerror = () => reject(request.error);
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
   });
 }
 
-export async function flushQueue(upload) {
-  const queued = await listQueuedSegments();
+export async function enqueueSegment(segment) {
+  const fingerprint = segment.fingerprint || segment;
+  const id = queueItemId({ fingerprint });
+  return write({
+    ...segment,
+    id,
+    deviceId: fingerprint.deviceId ?? fingerprint.device_id,
+    fingerprint,
+    state: OUTBOX_STATES.QUEUED,
+    queuedAt: new Date().toISOString(),
+    attempts: segment.attempts || 0,
+    lastError: null
+  });
+}
+
+export async function listQueuedSegments(deviceId) {
   const db = await database();
-  for (const segment of queued) {
-    await upload(segment);
-    await new Promise((resolve, reject) => { const tx = db.transaction(STORE, 'readwrite'); tx.objectStore(STORE).delete(segment.id); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
+  const records = await new Promise((resolve, reject) => {
+    const request = db.transaction(STORE, 'readonly').objectStore(STORE).getAll();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const normalized = records.map(item => ({
+    ...item,
+    fingerprint: item.fingerprint || item,
+    deviceId: item.deviceId || item.fingerprint?.deviceId || item.device_id,
+    state: item.state === OUTBOX_STATES.SENDING ? OUTBOX_STATES.QUEUED : (item.state || OUTBOX_STATES.QUEUED)
+  }));
+  return dedupeQueueItems(deviceId ? normalized.filter(item => item.deviceId === deviceId) : normalized);
+}
+
+export async function getHighestQueuedSequence(deviceId) {
+  const queued = await listQueuedSegments(deviceId);
+  return queued.reduce((highest, item) => Math.max(highest, sequenceOf(item)), -1);
+}
+
+export async function flushQueue(upload, onChange = () => {}) {
+  const queued = await listQueuedSegments();
+  const result = { sent: 0, failed: 0 };
+  for (const item of queued) {
+    const sending = { ...item, state: OUTBOX_STATES.SENDING, attempts: (item.attempts || 0) + 1, lastError: null };
+    await write(sending);
+    await onChange(sending);
+    try {
+      await upload(sending);
+      await remove(item.id);
+      result.sent += 1;
+      await onChange({ ...sending, state: 'SENT' });
+    } catch (error) {
+      const failed = { ...sending, state: OUTBOX_STATES.FAILED, lastError: error?.message || 'Transmission failed' };
+      await write(failed);
+      result.failed += 1;
+      await onChange(failed);
+    }
   }
-  return queued.length;
+  return result;
 }

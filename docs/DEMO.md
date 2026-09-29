@@ -9,16 +9,17 @@ Record two short screen recordings for the final submission. Use the shared test
 3. Show that a local video segment can be played and downloaded from the Local recordings table.
 4. Point out the SHA-256 fingerprint, capture time, and Fingerprints sent metric.
 5. Select **Simulate network loss**, wait for one segment, then select **Restore uplink** to show the queued fingerprint upload.
-6. Import `sample-fingerprints.txt` using **Import .txt hashes**. Show the success message.
-7. Explain that the cloud receives timestamps and SHA-256 fingerprints only; the local video is not uploaded.
+6. Refresh the page and show that IndexedDB restores the local recording and outbox state.
+7. Lock an incident window and show that only locked video becomes available to the insurer.
 
 ## Decoder / Insurer demo
 
 1. Open **Decoder / insurer -> Fingerprint audit**.
 2. Show the cloud reference stream arriving from Supabase Realtime.
-3. Upload `sample-fingerprints.txt` using **Open fingerprint file**.
-4. Show the matching result. Then alter one character in a copied file and repeat the check to demonstrate a mismatch.
-5. Explain that the Decoder compares each imported value with the persistent cloud reference set.
+3. Download an original Encoder video and verify it to show `VERIFIED`.
+4. Re-encode or blur a copy and verify it to show `MISMATCH`.
+5. Download a fingerprint `.txt`, alter one character, and show `NOT_FOUND`.
+6. Retrieve a private locked incident video, then play, download, and verify it.
 
 ## Recording notes
 
