@@ -36,4 +36,8 @@ if (fs.existsSync(frontendDir)) {
   app.use(express.static(frontendDir));
   app.get('*', (_, res) => res.sendFile(path.join(frontendDir, 'index.html')));
 }
-app.listen(process.env.PORT||3001,()=>console.log(`CloudDash API listening on ${process.env.PORT||3001}`));
+if (!process.env.VERCEL) {
+  app.listen(process.env.PORT||3001,()=>console.log(`CloudDash API listening on ${process.env.PORT||3001}`));
+}
+
+export default app;
