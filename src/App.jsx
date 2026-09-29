@@ -251,6 +251,14 @@ function Monitor({ videos, notify }) {
         <div className="panel-title"><div><h2>{selectedSession ? 'Selected session segments' : 'Incoming fingerprints'}</h2><p>{selectedSession ? `${selectedSession.device} - ${formatWindow(selectedSession)}` : 'Hashes are checked when a segment reaches the evidence service.'}</p></div>{selectedSession && <Badge tone="info">{selectedSession.records.length} segments</Badge>}</div>
         <div className="fingerprint-list">{(selectedSession?.records || records).map((video, index) => <div key={video.id}><span>#{video.sequence ?? String(index + 1).padStart(2, '0')}</span><b>{video.name || video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "Verified" ? "success" : "warning"}>{video.integrity === "Verified" ? "signed" : "review"}</Badge></div>)}</div>
       </section>
+      <section className="panel future-table">
+        <div className="panel-title"><div><h2>Planned improvements</h2><p>Upcoming insurance workflow features. These are not active evidence records.</p></div><Badge tone="info">Upcoming</Badge></div>
+        <div className="table-wrap"><table><thead><tr><th>Improvement</th><th>Purpose</th><th>Stage</th></tr></thead><tbody>
+          <tr><td>Claims workspace</td><td>Create an insurance case directly from an evidence session.</td><td><span className="future-status">Planned</span></td></tr>
+          <tr><td>Claim report export</td><td>Generate a shareable evidence, hash, and audit summary.</td><td><span className="future-status">Planned</span></td></tr>
+          <tr><td>Alert rules</td><td>Notify adjusters about upload delays and failed integrity checks.</td><td><span className="future-status">Planned</span></td></tr>
+        </tbody></table></div>
+      </section>
     </div>
   );
 }
