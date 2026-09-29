@@ -31,4 +31,9 @@ app.get('/api/alerts',actor,(_,res)=>res.json(alerts));
 app.patch('/api/alerts/:id/resolve',actor,allow('ADMIN','ANALYST'),(req,res)=>{const alert=alerts.find(a=>a.id===req.params.id);if(!alert)return res.status(404).json({error:'Alert not found'});alert.resolved=true;log(req.user.email,'Alert resolved',alert.id);res.json(alert)});
 app.get('/api/audit-logs',actor,allow('ADMIN','ANALYST'),(_,res)=>res.json(audit));
 app.post('/api/segments/verify',actor,allow('ADMIN','ANALYST'),(req,res)=>{const segments=[...(req.body.segments||[])].sort((a,b)=>a.sequence-b.sequence);let previousHash=null;for(const segment of segments){const expected=crypto.createHash('sha256').update(`${previousHash||'GENESIS'}:${segment.sha256}:${segment.sequence}`).digest('hex');if(segment.chainHash!==expected||segment.previousHash!==previousHash)return res.status(422).json({valid:false,failedSequence:segment.sequence,expected});previousHash=segment.chainHash}log(req.user.email,'Evidence chain verified',`${segments.length} segments`);res.json({valid:true,lastHash:previousHash,segments:segments.length})});
+const frontendDir = path.join(__dirname, '..', 'dist');
+if (fs.existsSync(frontendDir)) {
+  app.use(express.static(frontendDir));
+  app.get('*', (_, res) => res.sendFile(path.join(frontendDir, 'index.html')));
+}
 app.listen(process.env.PORT||3001,()=>console.log(`CloudDash API listening on ${process.env.PORT||3001}`));
