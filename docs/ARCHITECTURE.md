@@ -2,9 +2,11 @@
 
 ## Evidence path
 
-`Dashcam -> API Gateway -> encrypted object storage -> queue -> metadata/hash worker -> AI analysis worker -> PostgreSQL + immutable audit log -> dashboard and alert service`
+`Driver camera or fingerprint .txt -> SHA-256 + timestamp -> IndexedDB offline queue -> Supabase Postgres + Realtime -> insurer Decoder comparison and audit`
 
-The browser dashboard communicates with a stateless Express API. Uploads are stored outside the web process in production (S3, Azure Blob Storage, or GCS). A queue decouples ingestion from metadata extraction and GPU/CPU inference. Workers write evidence metadata, the SHA-256 digest, inference results, and audit entries to PostgreSQL.
+The browser Encoder captures video only for local driver playback and download. It does not send raw video to the cloud. It creates SHA-256 fingerprints from recorded data and accepts `.txt` files containing one generated SHA-256 fingerprint per line. Every fingerprint is timestamped before it is persisted in Supabase. IndexedDB queues records while connectivity is unavailable, then flushes them once the uplink returns.
+
+The insurer Decoder receives the cloud fingerprint stream through Supabase Realtime. It imports a future `.txt` fingerprint set and compares each value against the persistent cloud reference set. Missing values are reported as integrity mismatches. The ordered segment-chain audit remains available as a supplementary integrity check for prior evidence records.
 
 ## Security controls
 

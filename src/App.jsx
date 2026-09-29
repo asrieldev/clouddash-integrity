@@ -76,17 +76,14 @@ import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments, uploadQueuedSegment, uploadSegment } from "./evidenceRepository";
 import { enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
+import { parseFingerprintFile } from "./security/fingerprintFile";
+import { listFingerprints, storeFingerprint } from "./fingerprintRepository";
+import { subscribeToEvidence } from "./realtime";
 
 const NAV = [
-  ["Live monitor", "/", Activity],
-  ["Verify evidence", "/evidence", ShieldCheck],
-  ["Driver capture", "/encoder", Camera],
-  ["Ingestion queue", "/queue", HardDriveUpload],
-  ["Incidents", "/incidents", AlertTriangle],
-  ["Alerts", "/alerts", Bell],
-  ["Integrity log", "/integrity", FileCheck2],
-  ["Settings", "/settings", Settings],
-  ["Documentation", "/documentation", BookOpen],
+  { label: "Encoder / transmitter", items: [["Driver capture", "/encoder", Camera]] },
+  { label: "Decoder / insurer", items: [["Live monitor", "/", Activity], ["Verify evidence", "/evidence", ShieldCheck], ["Fingerprint audit", "/decoder", FileCheck2]] },
+  { label: "Operations", items: [["Ingestion queue", "/queue", HardDriveUpload], ["Incidents", "/incidents", AlertTriangle], ["Alerts", "/alerts", Bell], ["Settings", "/settings", Settings], ["Documentation", "/documentation", BookOpen]] },
 ];
 const chartData = [
   { d: "Mon", v: 18, c: 72 },
@@ -188,12 +185,15 @@ function Layout({ children, alerts, setAlerts, session }) {
           </span>
         </NavLink>
         <nav className="side-navigation" aria-label="Primary navigation">
-          {NAV.map(([name, path, Icon]) => (
-            <NavLink key={path} to={path} end={path === "/"}>
-              <Icon size={16} />
-              {name}
-            </NavLink>
-          ))}
+          {NAV.map((group) => <div className="nav-group" key={group.label}>
+            <span className="nav-group-label">{group.label}</span>
+            {group.items.map(([name, path, Icon]) => (
+              <NavLink key={path} to={path} end={path === "/"}>
+                <Icon size={16} />
+                {name}
+              </NavLink>
+            ))}
+          </div>)}
         </nav>
         <div className="side-status">
           <div className="profile-control">
@@ -256,6 +256,14 @@ function Monitor({ videos, notify }) {
     } catch (error) { notify(`Could not refresh live evidence: ${error.message}`); }
   };
   useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let channel;
+    supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' }).then(({ data: workspaceId }) => {
+      if (workspaceId) channel = subscribeToEvidence(workspaceId, reload, reload);
+    });
+    return () => channel?.unsubscribe();
+  }, []);
   const valid = records.filter((video) => video.integrity === "Verified").length;
   const sessions = [...records]
     .sort((a, b) => new Date(a.capturedAt || 0) - new Date(b.capturedAt || 0))
@@ -789,19 +797,24 @@ function Encoder({ notify }) {
   const [syncing, setSyncing] = useState(false);
   const [lastClip, setLastClip] = useState(null);
   const [segmentLength, setSegmentLength] = useState(5);
+  const [retentionMinutes, setRetentionMinutes] = useState(3);
   const [recordingSource, setRecordingSource] = useState('camera');
+  const [importing, setImporting] = useState(false);
+  const [importedCount, setImportedCount] = useState(0);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const videoRef = useRef(null);
   const identityRef = useRef(null);
   const previousHashRef = useRef(null);
   const nextSequenceRef = useRef(3);
+  const nextFingerprintSequenceRef = useRef(0);
   const offlineRef = useRef(false);
   const lastClipUrlRef = useRef(null);
   const recordingRef = useRef(false);
   const segmentTimerRef = useRef(null);
   const segmentLengthRef = useRef(5);
   const simulationVideoRef = useRef(null);
+  const fingerprintInputRef = useRef(null);
   const [segments, setSegments] = useState([]);
   useEffect(() => { offlineRef.current = offline; }, [offline]);
   useEffect(() => { segmentLengthRef.current = segmentLength; }, [segmentLength]);
@@ -831,6 +844,20 @@ function Encoder({ notify }) {
     retry();
     return () => window.removeEventListener('online', retry);
   }, []);
+  useEffect(() => {
+    const removeExpiredLocalVideo = () => {
+      const cutoff = Date.now() - retentionMinutes * 60 * 1000;
+      setSegments((rows) => {
+        const retained = rows.filter((row) => row.locked || row.capturedAt >= cutoff);
+        rows.filter((row) => !retained.includes(row)).forEach((row) => URL.revokeObjectURL(row.preview.url));
+        if (lastClip && !retained.some((row) => row.seq === lastClip.sequence)) setLastClip(null);
+        return retained;
+      });
+    };
+    removeExpiredLocalVideo();
+    const timer = setInterval(removeExpiredLocalVideo, 10000);
+    return () => clearInterval(timer);
+  }, [retentionMinutes, lastClip]);
   async function prepareIdentity() {
     if (identityRef.current) return identityRef.current;
     if (!supabase) throw new Error('Supabase is not configured.');
@@ -849,6 +876,14 @@ function Encoder({ notify }) {
       .maybeSingle();
     if (sequenceError) throw sequenceError;
     nextSequenceRef.current = latest ? latest.sequence + 1 : 0;
+    const { data: latestFingerprint } = await supabase
+      .from('fingerprints')
+      .select('sequence')
+      .eq('device_id', device.id)
+      .order('sequence', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    nextFingerprintSequenceRef.current = latestFingerprint ? latestFingerprint.sequence + 1 : 0;
     previousHashRef.current = latest?.chain_hash || null;
     identityRef.current = { workspaceId, deviceId: device.id };
     return identityRef.current;
@@ -857,12 +892,9 @@ function Encoder({ notify }) {
     if (offlineRef.current || !navigator.onLine) return;
     setSyncing(true);
     try {
-      const synced = await flushQueue((queued) => uploadQueuedSegment({
-        workspaceId: queued.workspaceId,
-        deviceId: queued.deviceId,
-        segment: queued,
-        blob: queued.blob,
-      }));
+      const synced = await flushQueue((queued) => queued.kind === 'fingerprint'
+        ? storeFingerprint(queued.fingerprint)
+        : uploadQueuedSegment({ workspaceId: queued.workspaceId, deviceId: queued.deviceId, segment: queued, blob: queued.blob }));
       if (synced) notify(`${synced} queued video segment${synced === 1 ? '' : 's'} uploaded.`);
     } catch (error) {
       notify(`Queued video is waiting for a connection: ${error.message}`);
@@ -872,15 +904,46 @@ function Encoder({ notify }) {
   }
   async function persistChunk(blob, fileInfo) {
     const identity = await prepareIdentity();
-    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt: new Date().toISOString(), bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder', ...fileInfo } });
+    const capturedAt = new Date().toISOString();
+    const segment = await createEvidenceSegment({ sequence: nextSequenceRef.current++, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
-    const result = offlineRef.current ? (await enqueueSegment({ ...segment, ...identity, blob }), { queued: true }) : await uploadSegment({ ...identity, segment, blob });
+    const fingerprint = { ...identity, sequence: nextFingerprintSequenceRef.current++, sha256: segment.sha256, captured_at: capturedAt, source: 'recorded-video-segment' };
+    const result = offlineRef.current ? (await enqueueSegment({ kind: 'fingerprint', fingerprint }), { queued: true }) : await storeFingerprint(fingerprint).then(() => ({ queued: false })).catch(async (error) => { await enqueueSegment({ kind: 'fingerprint', fingerprint }); return { queued: true, error }; });
     const previewUrl = URL.createObjectURL(blob);
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
     lastClipUrlRef.current = previewUrl;
     const recordedClip = { url: previewUrl, sequence: segment.sequence, extension: fileInfo.extension };
-    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', preview: recordedClip }, ...rows].slice(0, 12));
+    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), capturedAt: Date.now(), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', locked, preview: recordedClip }, ...rows].slice(0, 12));
     setLastClip(recordedClip);
+  }
+  async function importFingerprintFile(file) {
+    if (!file) return;
+    setImporting(true);
+    try {
+      const { fingerprints, invalidLines } = parseFingerprintFile(await file.text());
+      if (invalidLines.length) throw new Error(`Lines ${invalidLines.join(', ')} are not SHA-256 fingerprints.`);
+      if (!fingerprints.length) throw new Error('The text file contains no fingerprints.');
+      const identity = await prepareIdentity();
+      let queued = 0;
+      for (const [index, hash] of fingerprints.entries()) {
+        const fingerprint = { ...identity, sequence: nextFingerprintSequenceRef.current++, sha256: hash, captured_at: new Date(Date.now() + index * 1000).toISOString(), source: 'text-file-import' };
+        if (offlineRef.current || !navigator.onLine) {
+          await enqueueSegment({ kind: 'fingerprint', fingerprint });
+          queued += 1;
+        } else {
+          try { await storeFingerprint(fingerprint); } catch (error) { await enqueueSegment({ kind: 'fingerprint', fingerprint }); queued += 1; }
+        }
+      }
+      setImportedCount((count) => count + fingerprints.length);
+      notify(`${fingerprints.length} timestamped fingerprints imported${queued ? `; ${queued} queued for upload` : ' and transmitted to Supabase'}.`);
+    } catch (error) { notify(`Fingerprint import failed: ${error.message}`); }
+    finally { setImporting(false); if (fingerprintInputRef.current) fingerprintInputRef.current.value = ''; }
+  }
+  function downloadLocalClip(segment) {
+    const anchor = document.createElement('a');
+    anchor.href = segment.preview.url;
+    anchor.download = `dashcam-local-${segment.seq}.webm`;
+    anchor.click();
   }
   function beginSegment(stream, source) {
     const mimeType = ['video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
@@ -1067,7 +1130,7 @@ function Encoder({ notify }) {
       setElapsed(0);
       setRecording(true);
       beginSegment(stream, recordingSource);
-      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} recording started. Each segment is saved as a complete playable video file.`);
+      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} recording started. Videos remain on this device; SHA-256 fingerprints go to Supabase.`);
     } catch (error) { notify(error.message || 'Camera access was not granted.'); }
   }
   function stopDashcam() {
@@ -1179,6 +1242,10 @@ function Encoder({ notify }) {
               {offline ? <Send size={16} /> : <WifiOff size={16} />}{" "}
               {offline ? "Restore uplink" : "Simulate network loss"}
             </button>
+            <input ref={fingerprintInputRef} type="file" accept=".txt,text/plain" hidden onChange={(event) => importFingerprintFile(event.target.files?.[0])} />
+            <button className="button secondary" disabled={importing} onClick={() => fingerprintInputRef.current?.click()}>
+              <FileCheck2 size={16} /> {importing ? 'Importing...' : 'Import .txt hashes'}
+            </button>
           </div>
           <div className="encoder-selects">
             <label>
@@ -1198,7 +1265,7 @@ function Encoder({ notify }) {
             </label>
             <label>
               Local retention
-              <select defaultValue="3">
+              <select value={retentionMinutes} onChange={(event) => setRetentionMinutes(Number(event.target.value))}>
                 <option value="3">3 minutes</option>
                 <option value="15">15 minutes</option>
                 <option value="60">1 hour</option>
@@ -1222,16 +1289,16 @@ function Encoder({ notify }) {
               tone="green"
             />
             <Metric
-              label="Hashes sent"
-              value={segments.filter((x) => x.state === "Sent").length}
-              change="SHA-256 chained"
+              label="Fingerprints sent"
+              value={segments.filter((x) => x.state === "Sent").length + importedCount}
+              change="SHA-256 cloud stream"
               icon={ShieldCheck}
               tone="violet"
             />
             <Metric
               label="Outbox pending"
               value={segments.filter((x) => x.state === "Queued").length}
-              change={syncing ? "Uploading queued clips" : offline ? "Awaiting uplink" : "No pending segments"}
+              change={syncing ? "Uploading queued hashes" : offline ? "Awaiting uplink" : "No pending fingerprints"}
               icon={Send}
               tone="amber"
             />
@@ -1239,8 +1306,8 @@ function Encoder({ notify }) {
           <article className="panel fingerprint">
             <div className="panel-title">
               <div>
-                <h2>Last segment fingerprint</h2>
-                <p>Immutable chain-of-custody preview</p>
+                <h2>Last transmitted fingerprint</h2>
+                <p>Cloud stores this hash and timestamp, not the video.</p>
               </div>
               <Lock size={16} />
             </div>
@@ -1252,16 +1319,16 @@ function Encoder({ notify }) {
               <dt>chain_status</dt>
               <dd className="hash-blue">Verified and linked</dd>
               <dt>retention</dt>
-              <dd>{locked ? "Locked incident evidence" : "Rolling local buffer"}</dd>
-            </dl> : <p className="muted">No recorded segment yet. Start the dashcam to create one.</p>}
+              <dd>{latest.locked ? "Locked on device" : `${retentionMinutes}-minute local buffer`}</dd>
+            </dl> : <p className="muted">No fingerprint yet. Record a clip or import a .txt list.</p>}
           </article>
         </aside>
       </section>
       <section className="panel segment-table">
         <div className="panel-title">
           <div>
-            <h2>Recordings on this device ({segments.length})</h2>
-            <p>Choose play to review a captured segment before downloading or verifying it.</p>
+            <h2>Local recordings on this device ({segments.length})</h2>
+            <p>Videos are retained locally only. The cloud receives their timestamped fingerprints.</p>
           </div>
           <span className="storage">
             Browser storage: {(segments.length * 0.38).toFixed(1)} MB used
@@ -1275,9 +1342,10 @@ function Encoder({ notify }) {
                 <th>Captured</th>
                 <th>Size</th>
                 <th>SHA-256</th>
-                <th>Transmission</th>
+                <th>Fingerprint transmission</th>
                 <th>Retention</th>
                 <th>Play</th>
+                <th>Download</th>
               </tr>
             </thead>
             <tbody>
@@ -1297,8 +1365,8 @@ function Encoder({ notify }) {
                     </Badge>
                   </td>
                   <td>
-                    <Badge tone={locked ? "warning" : "neutral"}>
-                      {locked ? "Locked" : "Rolling"}
+                    <Badge tone={s.locked ? "warning" : "neutral"}>
+                      {s.locked ? "Locked" : "Local buffer"}
                     </Badge>
                   </td>
                   <td>
@@ -1306,6 +1374,7 @@ function Encoder({ notify }) {
                       <Play size={16} />
                     </IconButton>
                   </td>
+                  <td><IconButton label={`Download local recording ${s.seq}`} onClick={() => downloadLocalClip(s)}><Download size={16} /></IconButton></td>
                 </tr>
               ))}
             </tbody>
@@ -1658,6 +1727,72 @@ function Integrity({ notify }) {
       <section className="panel fingerprint-stream">
         <div className="panel-title"><div><h2>Hash log</h2><p>Newest segments stored in Supabase.</p></div><Badge tone="info">SHA-256</Badge></div>
         {segments.length ? <div className="fingerprint-list">{segments.slice(0, 12).map((segment) => <div key={segment.id}><span>#{segment.sequence}</span><b>{segment.devices?.label || 'Driver dashcam'}</b><code>{segment.chain_hash}</code><Badge tone={segment.status === 'transmitted' ? 'success' : 'warning'}>{segment.status}</Badge></div>)}</div> : <Empty text="Record a clip from Driver capture, then run an audit." />}
+      </section>
+    </div>
+  );
+}
+
+function Decoder({ notify }) {
+  const [fingerprints, setFingerprints] = useState([]);
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState(null);
+  const inputRef = useRef(null);
+  async function reload() {
+    if (!supabase) return;
+    try {
+      const { data: workspaceId, error } = await supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' });
+      if (error) throw error;
+      setFingerprints(await listFingerprints(workspaceId));
+    } catch (error) { notify(`Could not retrieve cloud fingerprints: ${error.message}`); }
+  }
+  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    if (!supabase) return undefined;
+    let channel;
+    supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' }).then(({ data: workspaceId }) => {
+      if (workspaceId) channel = subscribeToEvidence(workspaceId, () => {}, () => {}, reload);
+    });
+    return () => channel?.unsubscribe();
+  }, []);
+  async function verifyFile(file) {
+    if (!file) return;
+    setChecking(true);
+    try {
+      const { fingerprints: imported, invalidLines } = parseFingerprintFile(await file.text());
+      if (invalidLines.length) throw new Error(`Lines ${invalidLines.join(', ')} are not SHA-256 fingerprints.`);
+      if (!imported.length) throw new Error('The text file contains no fingerprints.');
+      const references = new Set(fingerprints.map((record) => record.sha256));
+      const matched = imported.filter((hash) => references.has(hash));
+      const missing = imported.filter((hash) => !references.has(hash));
+      setResult({ total: imported.length, matched: matched.length, missing });
+      notify(missing.length ? `${missing.length} fingerprint${missing.length === 1 ? '' : 's'} failed verification.` : 'Integrity verified: every imported fingerprint matches the cloud record.');
+    } catch (error) { notify(`Verification failed: ${error.message}`); }
+    finally { setChecking(false); if (inputRef.current) inputRef.current.value = ''; }
+  }
+  return (
+    <div className="page">
+      <SectionHead
+        title="Decoder - insurer verification"
+        copy="Retrieve the cloud fingerprint stream and compare an incident fingerprint file without transferring the original video."
+        action={<button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button>}
+      />
+      <section className="metrics">
+        <Metric label="Cloud fingerprints" value={fingerprints.length} change="Timestamped SHA-256 records" icon={FileCheck2} tone="green" />
+        <Metric label="Stream state" value="Live" change="Supabase Realtime connected" icon={Activity} />
+        <Metric label="Last verification" value={result ? `${result.matched}/${result.total}` : '--'} change={result ? (result.missing.length ? 'Mismatch detected' : 'All fingerprints matched') : 'No file checked'} icon={ShieldCheck} tone={result?.missing.length ? 'amber' : 'violet'} />
+      </section>
+      <section className="decoder-layout">
+        <article className="panel decoder-intake">
+          <FileCheck2 size={25} />
+          <div><span>Incident fingerprint file</span><h2>Verify a `.txt` list</h2><p>Use one 64-character SHA-256 fingerprint per line. The Decoder compares every value with the cloud reference stream.</p></div>
+          <input ref={inputRef} type="file" accept=".txt,text/plain" hidden onChange={(event) => verifyFile(event.target.files?.[0])} />
+          <button className="button primary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open fingerprint file'}</button>
+          {result && <div className={result.missing.length ? 'decoder-result mismatch' : 'decoder-result'}><b>{result.missing.length ? 'Integrity mismatch' : 'Integrity verified'}</b><span>{result.matched} of {result.total} values match the cloud reference.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
+        </article>
+        <article className="panel fingerprint-stream">
+          <div className="panel-title"><div><h2>Cloud reference stream</h2><p>Persisted in Supabase with a capture timestamp and source.</p></div><Badge tone="success">Realtime</Badge></div>
+          {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>#{record.sequence}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone="info">{record.source}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip or import a .txt list from the Encoder." />}
+        </article>
       </section>
     </div>
   );
@@ -2316,6 +2451,7 @@ function CloudDash({ session }) {
             path="/integrity"
             element={<Integrity videos={videos} notify={notify} />}
           />
+          <Route path="/decoder" element={<Decoder notify={notify} />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/costs" element={<Analytics costs />} />

@@ -15,10 +15,10 @@
 3. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in the deployment environment.
 4. Configure the Authentication site URL and redirect URL to the deployed web origin.
 
-The migration creates the `profiles` row automatically on signup, scopes all evidence reads by workspace membership, permits device/evidence mutation only to Admin and Analyst members, and publishes evidence segments, incidents, and integrity checks through Realtime.
+The migration creates the `profiles` row automatically on signup, scopes all evidence and fingerprint reads by workspace membership, permits device/evidence mutation only to Admin and Analyst members, and publishes evidence segments, fingerprints, incidents, and integrity checks through Realtime.
 
 ## Realtime client
 
-Subscribe with `supabase.channel('evidence').on('postgres_changes', { event: '*', schema: 'public', table: 'evidence_segments' }, handler).subscribe()`. RLS remains enforced for each connected user.
+Subscribe with `supabase.channel('evidence').on('postgres_changes', { event: '*', schema: 'public', table: 'fingerprints' }, handler).subscribe()`. RLS remains enforced for each connected user. The Encoder writes only timestamped SHA-256 fingerprint records to this table; captured videos remain local to the driver device.
 
 The frontend wrappers in `src/auth.js` provide password sign-in, signup, sign-out, and session observation. `src/realtime.js` scopes evidence and incident subscriptions to one workspace. They intentionally throw a clear configuration error until the public URL and anon key are supplied.

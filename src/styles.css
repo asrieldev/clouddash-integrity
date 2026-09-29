@@ -1794,6 +1794,8 @@ body, .focused-shell { background: #111214; }
 .app-identity small { color: #9ca0a9; font-size: 9px; letter-spacing: 1.35px; }
 .app-identity strong { color: #f6f7f9; font-size: 16px; font-weight: 700; }
 .side-navigation { gap: 3px; margin-top: 8px; }
+.nav-group + .nav-group { margin-top: 17px; }
+.nav-group-label { display: block; padding: 0 11px 6px; color: #7d838d; font-size: 9px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
 .side-navigation a { min-height: 40px; padding: 0 11px; border-radius: 0; color: #b4b7bf; font-weight: 560; transition: background-color .16s ease, color .16s ease; }
 .side-navigation a:hover { background: #22242a; color: #fbfbfc; }
 .side-navigation a.active { background: #244b69; color: #f4f9ff; box-shadow: inset 3px 0 #85c9fb; }
@@ -1811,6 +1813,16 @@ body, .focused-shell { background: #111214; }
 .account-panel dd { margin: 3px 0 0; overflow-wrap: anywhere; color: #d7d9de; font-size: 12px; }
 .account-signout { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; height: 32px; border: 1px solid #4a4d53; border-radius: 4px; background: #292b30; color: #f1f2f3; cursor: pointer; font: inherit; font-size: 12px; font-weight: 650; }
 .account-signout:hover { background: #35383e; }
+.decoder-layout { display: grid; grid-template-columns: minmax(280px, .75fr) minmax(0, 1.25fr); gap: 18px; align-items: start; }
+.decoder-intake { display: grid; gap: 14px; }
+.decoder-intake > svg { color: #7fc2ef; }
+.decoder-intake span { color: #93a0af; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.decoder-intake h2 { margin: 5px 0; font-size: 18px; }
+.decoder-intake p { margin: 0; color: #a7abb4; font-size: 12px; line-height: 1.55; }
+.decoder-result { display: grid; gap: 4px; padding: 11px; border-left: 3px solid #47d795; background: #183126; color: #e7f7ee; font-size: 12px; }
+.decoder-result.mismatch { border-color: #f2b34e; background: #392a16; color: #fff0d5; }
+.decoder-result code { overflow: hidden; color: inherit !important; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 900px) { .decoder-layout { grid-template-columns: 1fr; } }
 .side-status .signal { background: #36d58b; box-shadow: 0 0 0 3px #143222; }
 .focused-main .page { max-width: 1420px; padding: 34px 32px 54px; }
 .section-head { margin-bottom: 26px; }
