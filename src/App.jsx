@@ -988,7 +988,10 @@ function Encoder({ notify }) {
         }
         notify(`${result.sent} queued fingerprint${result.sent === 1 ? '' : 's'} sent.`);
       }
-      if (result.failed) notify(`${result.failed} fingerprint${result.failed === 1 ? '' : 's'} remain queued. Check the outbox error.`);
+      if (result.failed) {
+        const firstError = result.failures[0]?.lastError || 'Transmission failed.';
+        notify(`${result.failed} fingerprint${result.failed === 1 ? '' : 's'} remain queued: ${firstError}`);
+      }
     } catch (error) {
       notify(`Outbox retry failed: ${error.message}`);
     } finally {
@@ -1365,6 +1368,8 @@ function Encoder({ notify }) {
   const duration = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
   const latest = segments.find(segment => segment.state === 'SENT');
   const sessionSegmentCount = activeSessionId ? segments.filter(segment => segment.sessionId === activeSessionId).length : 0;
+  const permanentOutbox = outbox.filter(item => item.errorCode === 'EVIDENCE_IDENTITY_CONFLICT');
+  const retryableOutbox = outbox.filter(item => item.errorCode !== 'EVIDENCE_IDENTITY_CONFLICT');
   return (
     <div className="page encoder-page">
       <SectionHead
@@ -1455,7 +1460,7 @@ function Encoder({ notify }) {
               {offline ? <Send size={16} /> : <WifiOff size={16} />}{" "}
               {offline ? "Restore uplink" : "Simulate network loss"}
             </button>
-            <button className="button secondary" disabled={syncing || !outbox.length || offline} onClick={syncQueuedSegments}>
+            <button className="button secondary" disabled={syncing || !retryableOutbox.length || offline} onClick={syncQueuedSegments}>
               <RefreshCw size={16} /> {syncing ? 'Retrying...' : 'Retry outbox'}
             </button>
           </div>
@@ -1527,7 +1532,7 @@ function Encoder({ notify }) {
             <Metric
               label="Outbox pending"
               value={outbox.length}
-              change={syncing ? "Sending queued fingerprints" : outbox.length ? (offline ? "Awaiting uplink" : `${outbox.filter(item => item.state === 'FAILED').length} failed; retry available`) : "No pending fingerprints"}
+              change={syncing ? "Sending queued fingerprints" : permanentOutbox.length ? `${permanentOutbox.length} legacy conflict${permanentOutbox.length === 1 ? '' : 's'} need review` : outbox.length ? (offline ? "Awaiting uplink" : `${outbox.filter(item => item.state === 'FAILED').length} failed; retry available`) : "No pending fingerprints"}
               icon={Send}
               tone="amber"
             />
@@ -1635,6 +1640,8 @@ function Queue({ videos, notify }) {
     }
   };
   useEffect(() => { reload(); }, []);
+  const permanent = queued.filter(item => item.errorCode === 'EVIDENCE_IDENTITY_CONFLICT');
+  const retryable = queued.filter(item => item.errorCode !== 'EVIDENCE_IDENTITY_CONFLICT');
   const evidence = queued.map(item => ({
     id: item.id,
     name: `Fingerprint #${item.fingerprint?.sequence}`,
@@ -1657,13 +1664,13 @@ function Queue({ videos, notify }) {
     <div className="page">
       <SectionHead
         title="Ingestion queue"
-        copy="Inspect fingerprints waiting in the persistent device outbox."
-        action={<NavLink className="button secondary" to="/encoder"><RefreshCw size={16}/> Open retry controls</NavLink>}
+        copy="Inspect fingerprints waiting in the persistent device outbox and legacy conflicts that require review."
+        action={<NavLink className="button secondary" to="/encoder"><RefreshCw size={16}/> Open Encoder</NavLink>}
       />
       <section className="panel pipeline">
         <div className="pipeline-title">
           <h2>Processing pipeline</h2>
-          <Badge tone={queued.length ? "warning" : "info"}>{queued.length ? `${queued.length} pending fingerprint${queued.length === 1 ? "" : "s"}` : 'Outbox clear'}</Badge>
+          <Badge tone={permanent.length ? "danger" : queued.length ? "warning" : "info"}>{permanent.length ? `${permanent.length} permanent conflict${permanent.length === 1 ? '' : 's'}` : queued.length ? `${queued.length} pending fingerprint${queued.length === 1 ? "" : "s"}` : 'Outbox clear'}</Badge>
         </div>
         {stages.map((s, i) => (
           <div className="stage" key={s}>
@@ -1696,7 +1703,8 @@ function Queue({ videos, notify }) {
           </div>
           <button className="text-button" onClick={reload}>{loading ? "Refreshing..." : "Refresh queue"}</button>
         </div>
-        {queued.length > 0 && <div className="queue-callout"><WifiOff size={16} /><span>{queued.length} recording{queued.length === 1 ? " is" : "s are"} safely stored in this browser and will upload when the uplink returns.</span></div>}
+        {retryable.length > 0 && <div className="queue-callout"><WifiOff size={16} /><span>{retryable.length} fingerprint{retryable.length === 1 ? " is" : "s are"} stored in this browser and will retry when the uplink returns.</span></div>}
+        {permanent.length > 0 && <div className="queue-callout"><AlertTriangle size={16} /><span>{permanent.length} legacy fingerprint{permanent.length === 1 ? ' conflicts' : 's conflict'} with an existing cloud identity. Local videos were retained; these entries cannot be retried automatically.</span></div>}
         {evidence.length ? <EvidenceTable videos={evidence} statusLabel="Queue details" /> : <Empty text="No pending fingerprints." />}
       </section>
     </div>

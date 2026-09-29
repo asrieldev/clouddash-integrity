@@ -30,9 +30,13 @@ export function toFingerprintRow(fingerprint) {
 }
 
 function safeRepositoryError(error, conflictMessage = 'A different fingerprint already uses this evidence identity. Recording was not overwritten.') {
-  if (error?.code === '42501') return new Error('Supabase rejected the fingerprint. Check workspace membership, device ownership, and RLS policies.');
-  if (error?.code === '23505') return new Error(conflictMessage);
-  return new Error(error?.message || 'Fingerprint transmission failed.');
+  const safe = new Error(error?.code === '42501'
+    ? 'Supabase rejected the fingerprint. Check workspace membership, device ownership, and RLS policies.'
+    : error?.code === '23505'
+      ? conflictMessage
+      : error?.message || 'Fingerprint transmission failed.');
+  safe.code = error?.code === '23505' ? 'EVIDENCE_IDENTITY_CONFLICT' : error?.code;
+  return safe;
 }
 
 export async function listFingerprints(workspaceId) {
