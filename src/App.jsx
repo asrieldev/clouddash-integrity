@@ -77,11 +77,11 @@ import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { getOrCreateDeviceKeyPair, getStoredDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from "./security/deviceKeys";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments } from "./evidenceRepository";
-import { allocateNextSequence, enqueueSegment, flushQueue, getHighestQueuedSequence, listQueuedSegments } from "./storage/offlineQueue";
+import { enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
 import { getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
-import { parseFingerprintFile } from "./security/fingerprintFile";
+import { createEvidenceManifest, parseEvidenceManifest, parseFingerprintFile } from "./security/fingerprintFile";
 import { compareVideoHash, verifyTrustedFingerprint } from "./security/verification";
-import { createIncident, downloadIncidentVideo, latestFingerprint, listFingerprints, listIncidentVideos, storeFingerprint, uploadIncidentVideo } from "./fingerprintRepository";
+import { createCaptureSession, createIncident, downloadIncidentVideo, endCaptureSession, listFingerprints, listIncidentVideos, storeFingerprint, uploadIncidentVideo } from "./fingerprintRepository";
 import { subscribeToEvidence } from "./realtime";
 
 const NAV = [
@@ -816,6 +816,7 @@ function Encoder({ notify }) {
   const identityRef = useRef(null);
   const previousHashRef = useRef(null);
   const nextSequenceRef = useRef(0);
+  const captureSessionIdRef = useRef(null);
   const offlineRef = useRef(false);
   const lastClipUrlRef = useRef(null);
   const recordingRef = useRef(false);
@@ -867,6 +868,7 @@ function Encoder({ notify }) {
     return {
       ...record,
       seq: record.sequence,
+      sessionId: record.sessionId || null,
       time: new Date(record.capturedAt).toLocaleTimeString('en-GB'),
       hash: record.sha256.slice(0, 12),
       fullHash: record.sha256,
@@ -906,12 +908,6 @@ function Encoder({ notify }) {
       device = await createDevice(workspaceId, user.id, keys.publicJwk, 'Driver Dashcam', deviceId);
       localStorage.setItem(storageKey, deviceId);
     }
-    const cloudLatest = await latestFingerprint(device.id);
-    const queued = await listQueuedSegments(device.id);
-    const queuedLatest = queued.at(-1)?.fingerprint || null;
-    const queuedSequence = await getHighestQueuedSequence(device.id);
-    nextSequenceRef.current = allocateNextSequence(cloudLatest?.sequence ?? -1, queuedSequence);
-    previousHashRef.current = (queuedLatest?.chainHash ?? queuedLatest?.chain_hash) || cloudLatest?.chain_hash || null;
     identityRef.current = { workspaceId, deviceId: device.id, keys };
     const cloudRecords = await listFingerprints(workspaceId);
     setSentCount(cloudRecords.filter(record => record.device_id === device.id).length);
@@ -978,18 +974,23 @@ function Encoder({ notify }) {
   }
   async function persistChunk(blob, fileInfo) {
     const identity = await prepareIdentity();
+    const sessionId = captureSessionIdRef.current;
+    if (!sessionId) throw new Error('No active capture session. Start the dashcam again.');
     const capturedAt = new Date().toISOString();
     const sequence = nextSequenceRef.current++;
+    const segmentId = crypto.randomUUID();
     const shouldLock = incidentRemainingRef.current > 0;
     const incidentId = shouldLock ? incidentIdRef.current : null;
     if (shouldLock) incidentRemainingRef.current -= 1;
     if (incidentRemainingRef.current === 0) setIncidentActive(false);
-    const segment = await createEvidenceSegment({ ...identity, sequence, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked: shouldLock, source: 'browser-media-recorder', ...fileInfo } });
+    const segment = await createEvidenceSegment({ ...identity, sessionId, segmentId, sequence, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked: shouldLock, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
     const fingerprint = { ...segment, signatureAlgorithm: 'ECDSA_P256_SHA256', source: 'recorded-video-segment' };
     fingerprint.signature = await signFingerprint(identity.keys.privateKey, fingerprint);
     const localRecord = {
-      id: `${identity.deviceId}:${sequence}`,
+      id: segmentId,
+      segmentId,
+      sessionId,
       workspaceId: identity.workspaceId,
       deviceId: identity.deviceId,
       sequence,
@@ -1055,23 +1056,24 @@ function Encoder({ notify }) {
     if (!record?.blob) return notify('The local video is no longer available.');
     const calculatedHash = await sha256(new Uint8Array(await record.blob.arrayBuffer()));
     if (calculatedHash !== record.sha256) {
-      notify('Download blocked: the locally stored video bytes no longer match their fingerprint.');
+      notify('LOCAL_TAMPER_DETECTED: download blocked because local video bytes no longer match their signed fingerprint.');
       return;
     }
     const url = URL.createObjectURL(record.blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `dashcam-local-${record.sequence}.${record.mimeType?.includes('mp4') ? 'mp4' : 'webm'}`;
+    anchor.download = `dashcam-${record.sessionId || 'legacy'}-${record.sequence}-${record.segmentId || record.id}.${record.mimeType?.includes('mp4') ? 'mp4' : 'webm'}`;
     anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     notify(record.state === 'SENT' ? 'Original bytes downloaded. The Decoder can verify this file.' : 'Original bytes downloaded, but cloud verification will remain NOT_FOUND until its fingerprint is SENT.');
   }
   function downloadFingerprint(segment) {
-    const hash = segment.fullHash || segment.hash;
-    const url = URL.createObjectURL(new Blob([`${hash}\n`], { type: 'text/plain;charset=utf-8' }));
+    const manifest = createEvidenceManifest(segment.fingerprint || segment);
+    if (manifest.version < 2 || !manifest.segmentId || !manifest.sessionId) return notify('LEGACY_EVIDENCE: this recording has no session-bound manifest.');
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(manifest, null, 2)}\n`], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `dashcam-fingerprint-${segment.seq}.txt`;
+    anchor.download = `clouddash-evidence-${manifest.segmentId}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -1083,7 +1085,8 @@ function Encoder({ notify }) {
       incidentIdRef.current = incident.id;
       incidentRemainingRef.current = incidentAfter + 1;
       setIncidentActive(true);
-      for (const segment of segments.slice(0, incidentBefore)) {
+      const sessionSegments = segments.filter(segment => segment.sessionId === captureSessionIdRef.current);
+      for (const segment of sessionSegments.slice(0, incidentBefore)) {
         const record = await updateLocalVideo(segment.id, { locked: true, incidentId: incident.id });
         if (!record) continue;
         if (record.state === 'SENT' && record.fingerprintId && navigator.onLine && !offlineRef.current) {
@@ -1122,6 +1125,9 @@ function Encoder({ notify }) {
         simulationVideoRef.current?.stop?.();
         simulationVideoRef.current = null;
         recorderRef.current = null;
+        const sessionId = captureSessionIdRef.current;
+        captureSessionIdRef.current = null;
+        if (sessionId) endCaptureSession(sessionId).catch(error => notify(`Capture session close failed: ${error.message}`));
       }
     };
     recorder.start();
@@ -1272,18 +1278,22 @@ function Encoder({ notify }) {
   async function startDashcam() {
     try {
       if (!window.MediaRecorder) throw new Error('This browser does not support video recording.');
-      await prepareIdentity();
+      const identity = await prepareIdentity();
       const stream = recordingSource === 'simulation'
         ? await createSimulationStream()
         : await navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       if (!stream) throw new Error('This browser does not support camera recording.');
+      const session = await createCaptureSession(identity.workspaceId, identity.deviceId);
+      captureSessionIdRef.current = session.id;
+      nextSequenceRef.current = 0;
+      previousHashRef.current = null;
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
       recordingRef.current = true;
       setElapsed(0);
       setRecording(true);
       beginSegment(stream, recordingSource);
-      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} recording started. Videos remain on this device; SHA-256 fingerprints go to Supabase.`);
+      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} session ${session.id.slice(0, 8)} started. Videos remain on this device; signed fingerprints go to Supabase.`);
     } catch (error) { notify(error.message || 'Camera access was not granted.'); }
   }
   function stopDashcam() {
@@ -1515,9 +1525,10 @@ function Encoder({ notify }) {
             </thead>
             <tbody>
               {segments.map((s) => (
-                <tr key={s.seq}>
+                <tr key={s.id}>
                   <td>
                     <b>#{s.seq}</b>
+                    <small>Session {s.sessionId ? s.sessionId.slice(0, 8) : 'legacy'}</small>
                   </td>
                   <td>{s.time}</td>
                   <td>{s.size}</td>
@@ -1885,6 +1896,7 @@ function Decoder({ notify }) {
   const [realtimeState, setRealtimeState] = useState('CONNECTING');
   const [cloudPlayback, setCloudPlayback] = useState(null);
   const [incidentChecks, setIncidentChecks] = useState({});
+  const [selectedManifest, setSelectedManifest] = useState(null);
   const inputRef = useRef(null);
   const videoInputRef = useRef(null);
   const incidentGroups = useMemo(() => Object.values(incidentVideos.reduce((groups, video) => {
@@ -1898,14 +1910,15 @@ function Decoder({ notify }) {
   async function inspectIncidentVideo(video, records) {
     const blob = await downloadIncidentVideo(video.storage_path);
     const observedHash = await sha256(new Uint8Array(await blob.arrayBuffer()));
-    const reference = records.find(record => record.id === video.fingerprint_id);
+    const reference = records.find(record => record.id === video.fingerprint_id || (video.segment_id && record.segment_id === video.segment_id));
     const hashCheck = compareVideoHash(observedHash, reference?.sha256);
     const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, records) : hashCheck;
+    const legacy = Number(reference?.version ?? 1) < 2;
     return {
       blob,
       observedHash,
       reference,
-      status: hashCheck.valid ? trust.status : hashCheck.status,
+      status: hashCheck.valid && legacy && trust.signatureValid ? 'LEGACY_EVIDENCE' : hashCheck.valid ? trust.status : hashCheck.status,
       hashMatches: hashCheck.valid,
       signatureValid: trust.signatureValid,
       chain: trust.chain,
@@ -1949,17 +1962,38 @@ function Decoder({ notify }) {
     if (!file) return;
     setChecking(true);
     try {
-      const { fingerprints: imported, invalidLines } = parseFingerprintFile(await file.text());
+      const text = await file.text();
+      if (file.name.toLowerCase().endsWith('.json') || text.trim().startsWith('{') || text.trim().startsWith('[')) {
+        const parsed = parseEvidenceManifest(text);
+        if (parsed.status !== 'VALID') throw new Error('INVALID_MANIFEST: required signed evidence fields are missing.');
+        const checks = await Promise.all(parsed.manifests.map(async manifest => {
+          const reference = fingerprints.find(record => record.segment_id === manifest.segmentId);
+          if (!reference) return { status: 'FINGERPRINT_NOT_FOUND', valid: false };
+          if (reference.workspace_id !== manifest.workspaceId || reference.session_id !== manifest.sessionId) return { status: 'SESSION_MISMATCH', valid: false };
+          if (reference.device_id !== manifest.deviceId) return { status: 'DEVICE_MISMATCH', valid: false };
+          if (!await verifyFingerprintSignature(reference.devices?.public_key, manifest, manifest.signature)) return { status: 'INVALID_SIGNATURE', valid: false };
+          const sameTimestamp = new Date(reference.captured_at).toISOString() === new Date(manifest.capturedAt).toISOString();
+          if (reference.sequence !== manifest.sequence || Number(reference.bytes) !== manifest.bytes || !sameTimestamp || reference.sha256 !== manifest.sha256 || (reference.previous_hash ?? null) !== manifest.previousHash || reference.chain_hash !== manifest.chainHash || reference.signature !== manifest.signature || reference.signature_algorithm !== manifest.signatureAlgorithm) return { status: 'INVALID_MANIFEST', valid: false };
+          return verifyTrustedFingerprint(reference, fingerprints);
+        }));
+        const status = checks.find(check => !check.valid)?.status || 'VERIFIED';
+        setSelectedManifest(parsed.manifests.length === 1 ? parsed.manifests[0] : null);
+        setResult({ status, total: parsed.manifests.length, matched: checks.filter(check => check.valid).length, missing: [] });
+        notify(status === 'VERIFIED' ? 'Evidence manifest matched its trusted cloud record.' : `${status}: manifest verification failed.`);
+        return;
+      }
+      const { fingerprints: imported, invalidLines } = parseFingerprintFile(text);
       if (invalidLines.length) throw new Error(`Lines ${invalidLines.join(', ')} are not SHA-256 fingerprints.`);
       if (!imported.length) throw new Error('The text file contains no fingerprints.');
       const checks = await Promise.all(imported.map(async hash => {
         const reference = fingerprints.find(record => record.sha256 === hash);
-        return reference ? verifyTrustedFingerprint(reference, fingerprints) : { status: 'NOT_FOUND', valid: false };
+        return reference ? verifyTrustedFingerprint(reference, fingerprints) : { status: 'FINGERPRINT_NOT_FOUND', valid: false };
       }));
-      const missing = imported.filter((_, index) => checks[index].status === 'NOT_FOUND');
+      const missing = imported.filter((_, index) => checks[index].status === 'FINGERPRINT_NOT_FOUND');
       const matched = checks.filter(check => check.valid);
       const status = checks.find(check => !check.valid)?.status || 'VERIFIED';
       setResult({ status, total: imported.length, matched: matched.length, missing });
+      setSelectedManifest(null);
       notify(status === 'VERIFIED' ? 'Every supplied fingerprint passed cloud, signature, and chain verification.' : `${status}: fingerprint verification failed.`);
     } catch (error) { notify(`Verification failed: ${error.message}`); }
     finally { setChecking(false); if (inputRef.current) inputRef.current.value = ''; }
@@ -1969,7 +2003,14 @@ function Decoder({ notify }) {
     setChecking(true);
     try {
       const observedHash = await sha256(new Uint8Array(await file.arrayBuffer()));
-      const reference = fingerprints.find((record) => record.sha256 === observedHash);
+      const segmentId = file.name.match(/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(?:webm|mp4)$/i)?.[1];
+      const reference = selectedManifest
+        ? fingerprints.find(record => record.segment_id === selectedManifest.segmentId)
+        : (segmentId ? fingerprints.find(record => record.segment_id === segmentId) : null) || fingerprints.find(record => record.sha256 === observedHash);
+      if (selectedManifest && reference && (reference.session_id !== selectedManifest.sessionId || reference.device_id !== selectedManifest.deviceId || reference.sequence !== selectedManifest.sequence)) {
+        setVideoResult({ name: file.name, observedHash, status: 'SESSION_MISMATCH', reference, reason: 'The selected manifest does not identify this trusted session segment.' });
+        return;
+      }
       const hashCheck = compareVideoHash(observedHash, reference?.sha256);
       const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, fingerprints) : hashCheck;
       const status = hashCheck.valid ? trust.status : hashCheck.status;
@@ -1979,11 +2020,11 @@ function Decoder({ notify }) {
     finally { setChecking(false); if (videoInputRef.current) videoInputRef.current.value = ''; }
   }
   function downloadCloudFingerprints() {
-    const content = fingerprints.map((record) => record.sha256).join('\n');
-    const url = URL.createObjectURL(new Blob([content ? `${content}\n` : ''], { type: 'text/plain;charset=utf-8' }));
+    const manifests = fingerprints.filter(record => Number(record.version) >= 2).map(createEvidenceManifest);
+    const url = URL.createObjectURL(new Blob([`${JSON.stringify(manifests, null, 2)}\n`], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = 'clouddash-cloud-fingerprints.txt';
+    anchor.download = 'clouddash-cloud-evidence-manifests.json';
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -2026,15 +2067,15 @@ function Decoder({ notify }) {
       <section className="decoder-layout">
         <article className="panel decoder-intake">
           <FileCheck2 size={25} />
-          <div><span>Incident fingerprint file</span><h2>Verify a `.txt` list</h2><p>Use one 64-character SHA-256 fingerprint per line. The Decoder compares every value with the cloud reference stream.</p></div>
-          <input ref={inputRef} type="file" accept=".txt,text/plain" hidden onChange={(event) => verifyFile(event.target.files?.[0])} />
-          <button className="button primary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open fingerprint file'}</button>
+          <div><span>Evidence manifest</span><h2>Verify a signed manifest</h2><p>Open a version-2 JSON manifest to resolve one exact session segment. Legacy raw-hash TXT files remain supported but do not prove session identity.</p></div>
+          <input ref={inputRef} type="file" accept=".json,.txt,application/json,text/plain" hidden onChange={(event) => verifyFile(event.target.files?.[0])} />
+          <button className="button primary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open evidence manifest'}</button>
           {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} values exist in the trusted cloud stream.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
           <div className="decoder-verifier">
             <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select the original local recording. CloudDash hashes its bytes in this browser and compares the result with Supabase; the video is never uploaded.</p>
             <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
             <button className="button secondary" disabled={checking} onClick={() => videoInputRef.current?.click()}><FileVideo size={16} /> {checking ? 'Checking...' : 'Open video file'}</button>
-            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'MATCH' : 'MISMATCH'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
+            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'VERIFIED' : videoResult.status === 'LEGACY_EVIDENCE' ? 'REVIEW' : 'FAILED'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
           </div>
         </article>
         <article className="panel fingerprint-stream">
@@ -2048,24 +2089,26 @@ function Decoder({ notify }) {
           const groupChecks = group.videos.map(video => incidentChecks[video.id]);
           const groupFinished = groupChecks.every(check => check && check.status !== 'CHECKING');
           const groupVerified = groupFinished && groupChecks.every(check => check.status === 'VERIFIED');
+          const groupLegacy = groupFinished && groupChecks.every(check => check.status === 'VERIFIED' || check.status === 'LEGACY_EVIDENCE') && groupChecks.some(check => check.status === 'LEGACY_EVIDENCE');
           const firstCapture = new Date(group.videos[0].captured_at);
           const lastCapture = new Date(group.videos.at(-1).captured_at);
           const totalBytes = group.videos.reduce((total, video) => total + Number(video.bytes || 0), 0);
           return <Fragment key={group.id}>
-            <tr className="incident-group-row"><td colSpan="8"><div><span><b>Incident {group.id.slice(0, 8)}</b><small>{group.videos.length} segments · #{group.videos[0].sequence}-#{group.videos.at(-1).sequence} · {firstCapture.toLocaleTimeString()}-{lastCapture.toLocaleTimeString()} · {Math.max(1, Math.round(totalBytes / 1024))} KB</small></span><Badge tone={groupVerified ? 'success' : groupFinished ? 'danger' : 'neutral'}>{groupVerified ? 'ALL MATCH' : groupFinished ? 'MISMATCH FOUND' : 'CHECKING'}</Badge></div></td></tr>
+            <tr className="incident-group-row"><td colSpan="8"><div><span><b>Incident {group.id.slice(0, 8)}</b><small>{group.videos.length} segments · #{group.videos[0].sequence}-#{group.videos.at(-1).sequence} · {firstCapture.toLocaleTimeString()}-{lastCapture.toLocaleTimeString()} · {Math.max(1, Math.round(totalBytes / 1024))} KB</small></span><Badge tone={groupVerified ? 'success' : groupLegacy ? 'warning' : groupFinished ? 'danger' : 'neutral'}>{groupVerified ? 'ALL VERIFIED' : groupLegacy ? 'LEGACY / REVIEW' : groupFinished ? 'FAILURE FOUND' : 'CHECKING'}</Badge></div></td></tr>
             {group.videos.map(video => {
               const check = incidentChecks[video.id];
               const reference = check?.reference || fingerprints.find(record => record.id === video.fingerprint_id);
               const verified = check?.status === 'VERIFIED';
+              const legacy = check?.status === 'LEGACY_EVIDENCE';
               const finished = check && check.status !== 'CHECKING';
               return <tr key={video.id}>
                 <td><b>{video.storage_path.split('/').at(-1)}</b><small>{reference?.source || 'Locked incident video'}</small></td>
-                <td><b>{video.devices?.label || 'Driver dashcam'} · #{video.sequence}</b><small>{video.device_id}</small></td>
+                <td><b>{video.devices?.label || 'Driver dashcam'} · #{video.sequence}</b><small>Session {video.session_id?.slice(0, 8) || 'legacy'} · Device {video.device_id.slice(0, 8)}</small></td>
                 <td><span>Captured {new Date(video.captured_at).toLocaleString()}</span><small>Received {reference ? new Date(reference.received_at || reference.created_at).toLocaleString() : 'Not found'}</small></td>
                 <td>{Math.max(1, Math.round(video.bytes / 1024))} KB<small>{video.mime_type}</small></td>
                 <td><span>Trusted <code title={reference?.sha256 || video.sha256}>{(reference?.sha256 || video.sha256).slice(0, 14)}...</code></span><small>Calculated {check?.observedHash ? <code title={check.observedHash}>{check.observedHash.slice(0, 14)}...</code> : 'Checking...'}</small></td>
                 <td><span>Signature {check?.signatureValid ? 'valid' : finished ? 'invalid' : 'checking'}</span><small>Chain {check?.chain?.valid ? 'valid' : finished ? 'invalid' : 'checking'}</small></td>
-                <td><Badge tone={verified ? 'success' : finished ? 'danger' : 'neutral'}>{verified ? 'MATCH' : finished ? 'MISMATCH' : 'CHECKING'}</Badge><small>{check?.status || 'CHECKING'}</small></td>
+                <td><Badge tone={verified ? 'success' : legacy ? 'warning' : finished ? 'danger' : 'neutral'}>{verified ? 'VERIFIED' : legacy ? 'REVIEW' : finished ? 'FAILED' : 'CHECKING'}</Badge><small>{check?.status || 'CHECKING'}</small></td>
                 <td><div className="row-actions"><IconButton label="Play incident video" onClick={() => openCloudIncident(video)}><Play size={16}/></IconButton><IconButton label="Verify incident video again" onClick={() => openCloudIncident(video, true)}><ShieldCheck size={16}/></IconButton><IconButton label="Download incident video" onClick={() => downloadCloudIncident(video)}><Download size={16}/></IconButton></div></td>
               </tr>;
             })}

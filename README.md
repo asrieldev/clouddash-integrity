@@ -15,7 +15,7 @@ Configure `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env`. Never comm
 
 ### Normal driving
 
-The Encoder records fixed-length video segments and persists their original blobs in IndexedDB. It calculates SHA-256 over the exact bytes, links the fingerprint to the previous chain hash, signs the canonical metadata with a device-local ECDSA P-256 private key, and sends only the fingerprint to Supabase. Normal video is never uploaded automatically.
+Each Start Dashcam action creates a new capture session. The Encoder records fixed-length video segments and persists their original blobs in IndexedDB under immutable segment UUIDs. It calculates SHA-256 over the exact bytes, links fingerprints only within that capture session, signs the canonical metadata with a device-local ECDSA P-256 private key, and sends only the fingerprint to Supabase. Normal video is never uploaded automatically.
 
 ### Incident evidence
 
@@ -23,7 +23,7 @@ The Encoder records fixed-length video segments and persists their original blob
 
 ### Decoder
 
-The Decoder accepts `.webm`, `.mp4`, and `.txt` files. Video hashing happens locally; the supplied file is not uploaded for verification. A `VERIFIED` result requires an exact SHA-256 match, a valid device signature, a valid sequence/hash chain, and the trusted Supabase record. Authorized users can also retrieve, play, download, and verify cloud incident video.
+The Decoder accepts `.webm`, `.mp4`, signed `.json` evidence manifests, and legacy `.txt` hash files. Video hashing happens locally; the supplied file is not uploaded for verification. A `VERIFIED` result requires an exact SHA-256 match, a valid device signature, a valid session sequence/hash chain, and the trusted Supabase record. Authorized users can also retrieve, play, download, and verify cloud incident video. Legacy evidence is marked for review rather than presented as session-verified.
 
 ## Security meaning
 
@@ -35,7 +35,7 @@ The Decoder accepts `.webm`, `.mp4`, and `.txt` files. Video hashing happens loc
 
 ## Offline and retention
 
-Fingerprint transmission uses a persistent IndexedDB outbox with `QUEUED`, `SENDING`, `SENT`, and `FAILED` states. Retries run on startup, reconnect, and manual request. Sequence allocation considers both the highest cloud sequence and highest queued sequence. Normal local video is deleted after the configured retention period; locked video is exempt.
+Fingerprint transmission uses a persistent IndexedDB outbox with `QUEUED`, `SENDING`, `SENT`, and `FAILED` states. Retries run on startup, reconnect, and manual request without changing the original session, segment identity, sequence, or chain fields. Every new capture session starts at sequence `0` with a null previous hash. Normal local video is deleted after the configured retention period; locked video is exempt.
 
 ## Supabase
 

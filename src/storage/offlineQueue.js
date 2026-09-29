@@ -25,7 +25,7 @@ function sequenceOf(item) {
 
 export function queueItemId(item) {
   const fingerprint = item.fingerprint || item;
-  return `${fingerprint.deviceId ?? fingerprint.device_id}:${fingerprint.sequence}`;
+  return fingerprint.segmentId ?? fingerprint.segment_id ?? `${fingerprint.deviceId ?? fingerprint.device_id}:${fingerprint.sequence}`;
 }
 
 export function dedupeQueueItems(items) {
@@ -65,6 +65,8 @@ export async function enqueueSegment(segment) {
     ...segment,
     id,
     deviceId: fingerprint.deviceId ?? fingerprint.device_id,
+    sessionId: fingerprint.sessionId ?? fingerprint.session_id ?? null,
+    segmentId: fingerprint.segmentId ?? fingerprint.segment_id ?? null,
     fingerprint,
     state: OUTBOX_STATES.QUEUED,
     queuedAt: new Date().toISOString(),
