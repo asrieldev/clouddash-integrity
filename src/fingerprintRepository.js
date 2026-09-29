@@ -69,18 +69,6 @@ export async function storeFingerprint(fingerprint) {
   return data;
 }
 
-export async function latestFingerprint(deviceId) {
-  const { data, error } = await requireSupabase()
-    .from('fingerprints')
-    .select('*')
-    .eq('device_id', deviceId)
-    .order('sequence', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw safeRepositoryError(error);
-  return data;
-}
-
 export async function createIncident(workspaceId, deviceId) {
   const { data, error } = await requireSupabase().from('incidents').insert({
     workspace_id: workspaceId,
@@ -93,9 +81,15 @@ export async function createIncident(workspaceId, deviceId) {
   return data;
 }
 
-export async function createCaptureSession(workspaceId, deviceId, id = crypto.randomUUID()) {
-  const { data, error } = await requireSupabase().from('capture_sessions').insert({ id, workspace_id: workspaceId, device_id: deviceId }).select().single();
-  if (error) throw safeRepositoryError(error);
+export async function createCaptureSession(workspaceId, deviceId, id = crypto.randomUUID(), startedAt = new Date().toISOString()) {
+  const client = requireSupabase();
+  const { data, error } = await client.from('capture_sessions').insert({ id, workspace_id: workspaceId, device_id: deviceId, started_at: startedAt }).select().single();
+  if (error?.code === '23505') {
+    const { data: existing, error: lookupError } = await client.from('capture_sessions').select('*').eq('id', id).maybeSingle();
+    if (lookupError) throw safeRepositoryError(lookupError);
+    if (existing?.workspace_id === workspaceId && existing?.device_id === deviceId) return { ...existing, idempotent: true };
+  }
+  if (error) throw safeRepositoryError(error, 'Capture session identity conflicts with another device. Recording was not transmitted.');
   return data;
 }
 

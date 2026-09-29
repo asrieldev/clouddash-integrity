@@ -1509,6 +1509,11 @@ code {
   box-shadow: 0 12px 30px #0006;
   animation: in 0.2s ease-out;
 }
+.toast.error {
+  background: #441b1f;
+  border-color: #7f3038;
+  color: #fee2e2;
+}
 @keyframes in {
   from {
     transform: translateY(10px);

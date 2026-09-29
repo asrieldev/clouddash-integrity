@@ -254,6 +254,9 @@ function Monitor({ videos, notify }) {
         capturedAt: record.captured_at,
         location: record.devices?.label || 'Driver dashcam',
         deviceId: record.device_id,
+        sessionId: record.session_id,
+        segmentId: record.segment_id,
+        version: Number(record.version ?? 1),
         sequence: record.sequence,
         bytes: record.bytes,
         hash: record.sha256,
@@ -271,18 +274,22 @@ function Monitor({ videos, notify }) {
     return () => channel?.unsubscribe();
   }, []);
   const valid = records.filter((video) => video.integrity === "SENT").length;
+  const legacyCount = records.filter(record => record.version < 2 || !record.sessionId).length;
   const sessions = [...records]
     .sort((a, b) => new Date(a.capturedAt || 0) - new Date(b.capturedAt || 0))
     .reduce((groups, record) => {
       const deviceId = record.deviceId || record.location || 'local';
-      const startedAt = new Date(record.capturedAt || 0).getTime();
-      const latest = groups.at(-1);
-      if (!latest || latest.deviceId !== deviceId || startedAt - latest.endAt > 90000) {
-        groups.push({ id: `${deviceId}-${record.id}`, deviceId, device: record.location, startAt: startedAt, endAt: startedAt, records: [record] });
-      } else {
-        latest.records.push(record);
-        latest.endAt = startedAt;
+      const legacy = record.version < 2 || !record.sessionId;
+      const id = legacy ? `legacy:${deviceId}` : record.sessionId;
+      const capturedAt = new Date(record.capturedAt || 0).getTime();
+      let session = groups.find(group => group.id === id);
+      if (!session) {
+        session = { id, deviceId, device: record.location, startAt: capturedAt, endAt: capturedAt, legacy, records: [] };
+        groups.push(session);
       }
+      session.records.push(record);
+      session.startAt = Math.min(session.startAt, capturedAt);
+      session.endAt = Math.max(session.endAt, capturedAt);
       return groups;
     }, []);
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) || sessions.at(-1);
@@ -301,25 +308,24 @@ function Monitor({ videos, notify }) {
       <section className="metrics monitor-metrics">
         <Metric label="Evidence records" value={records.length} change="Stored evidence segments" icon={FileVideo} />
         <Metric label="Cloud acknowledged" value={valid} change="Fingerprint inserts accepted" icon={ShieldCheck} tone="green" />
-        <Metric label="Needs review" value={records.length - valid} change="Awaiting upload or review" icon={AlertTriangle} tone="amber" />
-        <Metric label="Capture devices" value="1" change="Driver device online" icon={Camera} tone="violet" />
+        <Metric label="Legacy records" value={legacyCount} change="No capture-session guarantee" icon={AlertTriangle} tone="amber" />
+        <Metric label="Capture devices" value={new Set(records.map(record => record.deviceId)).size} change="Devices in cloud stream" icon={Camera} tone="violet" />
       </section>
       <section className="panel monitor-sessions">
         <div className="panel-title">
-          <div><h2>Evidence sessions</h2><p>Cloud records grouped by device and capture window.</p></div>
+          <div><h2>Evidence sessions</h2><p>Cloud records grouped by their signed capture-session identity.</p></div>
           <NavLink className="button secondary" to="/encoder"><Camera size={16} /> Open capture</NavLink>
         </div>
         {sessions.length ? <div className="table-wrap"><table><thead><tr><th>Session</th><th>Device</th><th>Capture window</th><th>Segments</th><th>Size</th><th>Integrity</th><th /></tr></thead><tbody>
           {sessions.map((session, index) => {
-            const sessionValid = session.records.every((record) => record.integrity === 'SENT');
             const totalBytes = session.records.reduce((total, record) => total + (record.bytes || 0), 0);
-            return <tr key={session.id} className="clickable" onClick={() => setSelectedSessionId(session.id)}><td><b>Session {String(index + 1).padStart(2, '0')}</b><small>{session.records[0].id.slice(0, 8)}</small></td><td>{session.device}</td><td>{formatWindow(session)}</td><td>{session.records.length}</td><td>{totalBytes ? `${Math.max(1, Math.round(totalBytes / 1024))} KB` : 'Pending'}</td><td><Badge tone={sessionValid ? 'success' : 'warning'}>{sessionValid ? 'Cloud acknowledged' : 'Review'}</Badge></td><td><NavLink to="/integrity" className="text-button" onClick={(event) => event.stopPropagation()}>Audit</NavLink></td></tr>;
+            return <tr key={session.id} className="clickable" onClick={() => setSelectedSessionId(session.id)}><td><b>{session.legacy ? 'Legacy evidence' : `Session ${String(index + 1).padStart(2, '0')}`}</b><small>{session.legacy ? session.deviceId.slice(0, 8) : session.id.slice(0, 8)}</small></td><td>{session.device}</td><td>{formatWindow(session)}</td><td>{session.records.length}</td><td>{totalBytes ? `${Math.max(1, Math.round(totalBytes / 1024))} KB` : 'Pending'}</td><td><Badge tone={session.legacy ? 'warning' : 'success'}>{session.legacy ? 'Legacy / review' : 'Cloud acknowledged'}</Badge></td><td><NavLink to="/integrity" className="text-button" onClick={(event) => event.stopPropagation()}>Audit</NavLink></td></tr>;
           })}
         </tbody></table></div> : <Empty text="No evidence sessions yet. Start Driver capture to create one." />}
       </section>
       <section className="panel fingerprint-stream">
         <div className="panel-title"><div><h2>{selectedSession ? 'Selected session segments' : 'Incoming fingerprints'}</h2><p>{selectedSession ? `${selectedSession.device} - ${formatWindow(selectedSession)}` : 'Fingerprints acknowledged by the evidence service.'}</p></div>{selectedSession && <Badge tone="info">{selectedSession.records.length} segments</Badge>}</div>
-        <div className="fingerprint-list">{(selectedSession?.records || records).map((video, index) => <div key={video.id}><span>#{video.sequence ?? String(index + 1).padStart(2, '0')}</span><b>{video.name || video.id}</b><code>{video.hash}</code><Badge tone={video.integrity === "SENT" ? "success" : "warning"}>{video.integrity === "SENT" ? "sent" : "review"}</Badge></div>)}</div>
+        <div className="fingerprint-list">{(selectedSession?.records || records).map((video, index) => <div key={video.id}><span>{video.sessionId ? `${video.sessionId.slice(0, 6)} · #${video.sequence}` : `legacy · #${video.sequence ?? index}`}</span><b>{video.name || video.id}</b><code>{video.hash}</code><Badge tone={video.version >= 2 ? "success" : "warning"}>{video.version >= 2 ? "sent" : "legacy"}</Badge></div>)}</div>
       </section>
     </div>
   );
@@ -493,7 +499,7 @@ function Dashboard({ videos, alerts, setAlerts }) {
   );
 }
 
-function EvidenceTable({ videos, compact, onSelect, onPlay }) {
+function EvidenceTable({ videos, compact, onSelect, onPlay, statusLabel = 'Analysis' }) {
   return (
     <div className="table-wrap">
       <table>
@@ -502,7 +508,7 @@ function EvidenceTable({ videos, compact, onSelect, onPlay }) {
             <th>Evidence</th>
             <th>Capture location</th>
             <th>Integrity</th>
-            <th>Analysis</th>
+            <th>{statusLabel}</th>
             {!compact && onPlay && <th>Play</th>}
           </tr>
         </thead>
@@ -532,7 +538,7 @@ function EvidenceTable({ videos, compact, onSelect, onPlay }) {
               </td>
               <td>
                 <Badge
-                  tone={v.integrity === "SENT" ? "success" : "warning"}
+                  tone={v.integrity === "SENT" ? "success" : v.integrity === "FAILED" ? "danger" : "warning"}
                 >
                   {v.integrity}
                 </Badge>
@@ -807,6 +813,7 @@ function Encoder({ notify }) {
   const [incidentBefore, setIncidentBefore] = useState(2);
   const [incidentAfter, setIncidentAfter] = useState(2);
   const [recordingSource, setRecordingSource] = useState('camera');
+  const [activeSessionId, setActiveSessionId] = useState(null);
   const [outbox, setOutbox] = useState([]);
   const [storedBytes, setStoredBytes] = useState(0);
   const [sentCount, setSentCount] = useState(0);
@@ -817,6 +824,7 @@ function Encoder({ notify }) {
   const previousHashRef = useRef(null);
   const nextSequenceRef = useRef(0);
   const captureSessionIdRef = useRef(null);
+  const captureSessionStartedAtRef = useRef(null);
   const offlineRef = useRef(false);
   const lastClipUrlRef = useRef(null);
   const recordingRef = useRef(false);
@@ -849,7 +857,7 @@ function Encoder({ notify }) {
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
   }, []);
   useEffect(() => {
-    const retry = () => syncQueuedSegments();
+    const retry = () => syncQueuedSegments(identityRef.current?.deviceId);
     window.addEventListener('online', retry);
     retry();
     return () => window.removeEventListener('online', retry);
@@ -922,7 +930,10 @@ function Encoder({ notify }) {
         const { data: { user } } = await supabase.auth.getUser();
         const localDeviceId = user ? localStorage.getItem(`clouddash-device:${user.id}`) : null;
         if (active && localDeviceId) await refreshLocalEvidence(localDeviceId);
-        if (active) await prepareIdentity();
+        if (active) {
+          const identity = await prepareIdentity();
+          await syncQueuedSegments(identity.deviceId);
+        }
       } catch (error) {
         if (active) notify(`Cloud setup failed; retained local video is still available: ${error.message}`);
       }
@@ -942,11 +953,20 @@ function Encoder({ notify }) {
     await updateLocalVideo(record.id, { incidentId, locked: true, cloudEvidenceId: uploaded.id, cloudStoragePath: uploaded.storage_path });
   }
 
-  async function syncQueuedSegments() {
-    if (offlineRef.current || !navigator.onLine) return;
+  async function syncQueuedSegments(deviceId = identityRef.current?.deviceId) {
+    if (!deviceId || offlineRef.current || !navigator.onLine) return;
     setSyncing(true);
     try {
       const result = await flushQueue(async (queued) => {
+        const queuedFingerprint = queued.fingerprint;
+        if (Number(queuedFingerprint.version ?? 1) >= 2) {
+          await createCaptureSession(
+            queuedFingerprint.workspaceId ?? queuedFingerprint.workspace_id,
+            queuedFingerprint.deviceId ?? queuedFingerprint.device_id,
+            queuedFingerprint.sessionId ?? queuedFingerprint.session_id,
+            queuedFingerprint.sessionStartedAt ?? queuedFingerprint.capturedAt ?? queuedFingerprint.captured_at
+          );
+        }
         const stored = await storeFingerprint(queued.fingerprint);
         const record = await updateLocalVideo(queued.localVideoId, { state: 'SENT', fingerprintId: stored.id, transmissionError: null });
         if (queued.incidentId && record) await uploadLockedRecord(record, queued.incidentId);
@@ -955,7 +975,7 @@ function Encoder({ notify }) {
           await updateLocalVideo(item.localVideoId, { state: item.state, transmissionError: item.lastError || null });
         }
         await refreshLocalEvidence();
-      });
+      }, deviceId);
       await refreshLocalEvidence();
       if (result.sent) {
         const identity = identityRef.current;
@@ -985,7 +1005,7 @@ function Encoder({ notify }) {
     if (incidentRemainingRef.current === 0) setIncidentActive(false);
     const segment = await createEvidenceSegment({ ...identity, sessionId, segmentId, sequence, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked: shouldLock, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
-    const fingerprint = { ...segment, signatureAlgorithm: 'ECDSA_P256_SHA256', source: 'recorded-video-segment' };
+    const fingerprint = { ...segment, sessionStartedAt: captureSessionStartedAtRef.current || capturedAt, signatureAlgorithm: 'ECDSA_P256_SHA256', source: 'recorded-video-segment' };
     fingerprint.signature = await signFingerprint(identity.keys.privateKey, fingerprint);
     const localRecord = {
       id: segmentId,
@@ -1075,7 +1095,7 @@ function Encoder({ notify }) {
     anchor.href = url;
     anchor.download = `clouddash-evidence-${manifest.segmentId}.json`;
     anchor.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   async function lockIncidentWindow() {
@@ -1127,6 +1147,7 @@ function Encoder({ notify }) {
         recorderRef.current = null;
         const sessionId = captureSessionIdRef.current;
         captureSessionIdRef.current = null;
+        captureSessionStartedAtRef.current = null;
         if (sessionId) endCaptureSession(sessionId).catch(error => notify(`Capture session close failed: ${error.message}`));
       }
     };
@@ -1276,15 +1297,20 @@ function Encoder({ notify }) {
     return stream;
   }
   async function startDashcam() {
+    let stream;
     try {
       if (!window.MediaRecorder) throw new Error('This browser does not support video recording.');
       const identity = await prepareIdentity();
-      const stream = recordingSource === 'simulation'
+      stream = recordingSource === 'simulation'
         ? await createSimulationStream()
         : await navigator.mediaDevices?.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       if (!stream) throw new Error('This browser does not support camera recording.');
-      const session = await createCaptureSession(identity.workspaceId, identity.deviceId);
-      captureSessionIdRef.current = session.id;
+      const sessionId = crypto.randomUUID();
+      const startedAt = new Date().toISOString();
+      if (!offlineRef.current && navigator.onLine) await createCaptureSession(identity.workspaceId, identity.deviceId, sessionId, startedAt);
+      captureSessionIdRef.current = sessionId;
+      captureSessionStartedAtRef.current = startedAt;
+      setActiveSessionId(sessionId);
       nextSequenceRef.current = 0;
       previousHashRef.current = null;
       streamRef.current = stream;
@@ -1293,8 +1319,13 @@ function Encoder({ notify }) {
       setElapsed(0);
       setRecording(true);
       beginSegment(stream, recordingSource);
-      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} session ${session.id.slice(0, 8)} started. Videos remain on this device; signed fingerprints go to Supabase.`);
-    } catch (error) { notify(error.message || 'Camera access was not granted.'); }
+      notify(`${recordingSource === 'simulation' ? 'Driving simulation' : 'Camera'} session ${sessionId.slice(0, 8)} started. Videos remain on this device; signed fingerprints go to Supabase.`);
+    } catch (error) {
+      stream?.getTracks().forEach(track => track.stop());
+      simulationVideoRef.current?.stop?.();
+      simulationVideoRef.current = null;
+      notify(error.message || 'Camera access was not granted.');
+    }
   }
   function stopDashcam() {
     recordingRef.current = false;
@@ -1310,6 +1341,7 @@ function Encoder({ notify }) {
   }
   const duration = `${String(Math.floor(elapsed / 60)).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
   const latest = segments.find(segment => segment.state === 'SENT');
+  const sessionSegmentCount = activeSessionId ? segments.filter(segment => segment.sessionId === activeSessionId).length : 0;
   return (
     <div className="page encoder-page">
       <SectionHead
@@ -1456,16 +1488,16 @@ function Encoder({ notify }) {
               icon={Clock3}
             />
             <Metric
-              label="Segments recorded"
-              value={segments.length}
-              change={incidentActive ? "Incident window active" : `${segmentLength} second chunks`}
+              label="Session segments"
+              value={sessionSegmentCount}
+              change={incidentActive ? "Incident window active" : activeSessionId ? `Session ${activeSessionId.slice(0, 8)}` : "No session started"}
               icon={FileVideo}
               tone="green"
             />
             <Metric
-              label="Fingerprints sent"
+              label="Cloud fingerprints"
               value={sentCount}
-              change="SHA-256 cloud stream"
+              change="Acknowledged for this device"
               icon={ShieldCheck}
               tone="violet"
             />
@@ -1487,7 +1519,7 @@ function Encoder({ notify }) {
             </div>
             {latest ? <dl>
               <dt>segment</dt>
-              <dd>#{latest.seq} · {latest.time}</dd>
+              <dd>{latest.sessionId ? `${latest.sessionId.slice(0, 8)} · ` : 'legacy · '}#{latest.seq} · {latest.time}</dd>
               <dt>segment_hash</dt>
               <dd className="hash-green">{latest.hash}...</dd>
               <dt>chain_status</dt>
@@ -1639,7 +1671,7 @@ function Queue({ videos, notify }) {
           <button className="text-button" onClick={reload}>{loading ? "Refreshing..." : "Refresh queue"}</button>
         </div>
         {queued.length > 0 && <div className="queue-callout"><WifiOff size={16} /><span>{queued.length} recording{queued.length === 1 ? " is" : "s are"} safely stored in this browser and will upload when the uplink returns.</span></div>}
-        {evidence.length ? <EvidenceTable videos={evidence} /> : <Empty text="No pending fingerprints." />}
+        {evidence.length ? <EvidenceTable videos={evidence} statusLabel="Queue details" /> : <Empty text="No pending fingerprints." />}
       </section>
     </div>
   );
@@ -1847,41 +1879,48 @@ function Integrity({ notify }) {
     try {
       const { data: workspaceId, error } = await supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' });
       if (error) throw error;
-      const records = (await listFingerprints(workspaceId)).filter(record => Number(record.version) === 1);
+      const records = await listFingerprints(workspaceId);
       setSegments(records);
-      const byDevice = records.reduce((groups, segment) => {
-        (groups[segment.device_id] ||= []).push(segment);
+      const byChain = records.reduce((groups, segment) => {
+        const version = Number(segment.version ?? 1);
+        const scope = version >= 2 && segment.session_id ? `session:${segment.session_id}` : `legacy:${segment.device_id}`;
+        (groups[scope] ||= []).push(segment);
         return groups;
       }, {});
-      const results = await Promise.all(Object.entries(byDevice).map(async ([deviceId, deviceSegments]) => {
-        const ordered = deviceSegments.sort((a, b) => a.sequence - b.sequence);
+      const results = await Promise.all(Object.entries(byChain).map(async ([scope, chainSegments]) => {
+        const ordered = chainSegments.sort((a, b) => a.sequence - b.sequence);
         const chain = await verifyEvidenceChain(ordered);
         const signaturesValid = (await Promise.all(ordered.map(segment => verifyFingerprintSignature(segment.devices?.public_key, segment, segment.signature)))).every(Boolean);
-        return { deviceId, label: ordered[0].devices?.label || 'Driver dashcam', total: ordered.length, ...chain, valid: chain.valid && signaturesValid, signaturesValid };
+        const legacy = Number(ordered[0].version ?? 1) < 2 || !ordered[0].session_id;
+        return { scope, sessionId: ordered[0].session_id, deviceId: ordered[0].device_id, label: ordered[0].devices?.label || 'Driver dashcam', total: ordered.length, ...chain, valid: !legacy && chain.valid && signaturesValid, legacy, signaturesValid };
       }));
       setAudits(results);
-      notify(results.every((result) => result.valid) ? 'Integrity audit completed: all chains are valid.' : 'Integrity audit found a chain mismatch.');
+      const failures = results.filter(result => !result.legacy && !result.valid).length;
+      notify(failures ? `Integrity audit found ${failures} modern session failure${failures === 1 ? '' : 's'}.` : 'Integrity audit completed. Modern capture sessions passed; legacy evidence remains review-only.');
     } catch (error) {
       notify(`Could not run integrity audit: ${error.message}`);
     } finally { setRunning(false); }
   }
   useEffect(() => { runAudit(); }, []);
-  const validChains = audits.filter((audit) => audit.valid).length;
+  const modernAudits = audits.filter(audit => !audit.legacy);
+  const validChains = modernAudits.filter((audit) => audit.valid).length;
+  const failedChains = modernAudits.filter(audit => !audit.valid).length;
+  const legacyChains = audits.filter(audit => audit.legacy).length;
   return (
     <div className="page">
       <SectionHead title="Integrity log" copy="Audit the exact hash chains stored for each driver device." action={<button className="button primary" onClick={runAudit} disabled={running}><ShieldCheck size={16} /> {running ? 'Auditing...' : 'Run audit'}</button>} />
       <section className="metrics">
         <Metric label="Stored segments" value={segments.length} change="Evidence records checked" icon={FileVideo} />
-        <Metric label="Valid chains" value={`${validChains}/${audits.length}`} change={audits.length ? 'Device chains verified' : 'No captured chains yet'} icon={ShieldCheck} tone="green" />
-        <Metric label="Chain failures" value={audits.filter((audit) => !audit.valid).length} change="Requires analyst review" icon={AlertTriangle} tone="amber" />
+        <Metric label="Verified sessions" value={`${validChains}/${modernAudits.length}`} change={modernAudits.length ? 'Session chains and signatures checked' : 'No version-2 sessions yet'} icon={ShieldCheck} tone="green" />
+        <Metric label="Failures / legacy" value={`${failedChains} / ${legacyChains}`} change="Failures require action; legacy requires review" icon={AlertTriangle} tone="amber" />
       </section>
       <section className="panel">
-        <div className="panel-title"><div><h2>Device audit results</h2><p>Each result recomputes the sequence and prior-hash link for every stored segment.</p></div></div>
-        {audits.length ? <div className="table-wrap"><table><thead><tr><th>Device</th><th>Segments</th><th>Last chain hash</th><th>Result</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.deviceId}><td><b>{audit.label}</b><small>{audit.deviceId.slice(0, 8)}</small></td><td>{audit.total}</td><td><code>{audit.lastHash?.slice(0, 24) || 'Not available'}...</code></td><td><Badge tone={audit.valid ? 'success' : 'danger'}>{audit.valid ? 'Signatures + chain valid' : audit.signaturesValid ? `${audit.status || 'BROKEN_CHAIN'} at #${audit.failedSequence}` : 'INVALID_SIGNATURE'}</Badge></td></tr>)}</tbody></table></div> : <Empty text="No recorded evidence is available to audit yet." />}
+        <div className="panel-title"><div><h2>Session audit results</h2><p>Each modern result recomputes its signed sequence and prior-hash links without mixing capture sessions.</p></div></div>
+        {audits.length ? <div className="table-wrap"><table><thead><tr><th>Session / device</th><th>Segments</th><th>Last chain hash</th><th>Result</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.scope}><td><b>{audit.legacy ? 'Legacy device chain' : `Session ${audit.sessionId.slice(0, 8)}`}</b><small>{audit.label} · {audit.deviceId.slice(0, 8)}</small></td><td>{audit.total}</td><td><code>{audit.lastHash?.slice(0, 24) || 'Not available'}...</code></td><td><Badge tone={audit.valid ? 'success' : audit.legacy ? 'warning' : 'danger'}>{audit.valid ? 'VERIFIED' : audit.legacy ? `LEGACY / REVIEW · ${audit.signaturesValid ? audit.status || 'chain evaluated' : 'INVALID_SIGNATURE'}` : audit.signaturesValid ? `${audit.status || 'BROKEN_CHAIN'} at #${audit.failedSequence}` : 'INVALID_SIGNATURE'}</Badge></td></tr>)}</tbody></table></div> : <Empty text="No recorded evidence is available to audit yet." />}
       </section>
       <section className="panel fingerprint-stream">
         <div className="panel-title"><div><h2>Hash log</h2><p>Newest segments stored in Supabase.</p></div><Badge tone="info">SHA-256</Badge></div>
-        {segments.length ? <div className="fingerprint-list">{segments.slice(0, 12).map((segment) => <div key={segment.id}><span>#{segment.sequence}</span><b>{segment.devices?.label || 'Driver dashcam'}</b><code>{segment.chain_hash}</code><Badge tone="neutral">stored</Badge></div>)}</div> : <Empty text="Record a clip from Driver capture, then run an audit." />}
+        {segments.length ? <div className="fingerprint-list">{segments.slice().reverse().slice(0, 12).map((segment) => <div key={segment.id}><span>{segment.session_id ? `${segment.session_id.slice(0, 6)} · #${segment.sequence}` : `legacy · #${segment.sequence}`}</span><b>{segment.devices?.label || 'Driver dashcam'}</b><code>{segment.chain_hash}</code><Badge tone={Number(segment.version ?? 1) >= 2 ? 'info' : 'warning'}>{Number(segment.version ?? 1) >= 2 ? 'stored' : 'legacy'}</Badge></div>)}</div> : <Empty text="Record a clip from Driver capture, then run an audit." />}
       </section>
     </div>
   );
@@ -1907,6 +1946,7 @@ function Decoder({ notify }) {
     ...group,
     videos: group.videos.sort((a, b) => a.sequence - b.sequence)
   })), [incidentVideos]);
+  const modernFingerprints = fingerprints.filter(record => Number(record.version ?? 1) >= 2 && record.session_id && record.segment_id);
   async function inspectIncidentVideo(video, records) {
     const blob = await downloadIncidentVideo(video.storage_path);
     const observedHash = await sha256(new Uint8Array(await blob.arrayBuffer()));
@@ -1954,7 +1994,7 @@ function Decoder({ notify }) {
     if (!supabase) return undefined;
     let channel;
     supabase.rpc('bootstrap_workspace', { workspace_name: 'Forensics Lab' }).then(({ data: workspaceId }) => {
-      if (workspaceId) channel = subscribeToEvidence(workspaceId, () => {}, reload, reload, setRealtimeState);
+      if (workspaceId) channel = subscribeToEvidence(workspaceId, reload, reload, setRealtimeState);
     });
     return () => channel?.unsubscribe();
   }, []);
@@ -2020,13 +2060,13 @@ function Decoder({ notify }) {
     finally { setChecking(false); if (videoInputRef.current) videoInputRef.current.value = ''; }
   }
   function downloadCloudFingerprints() {
-    const manifests = fingerprints.filter(record => Number(record.version) >= 2).map(createEvidenceManifest);
+    const manifests = modernFingerprints.map(createEvidenceManifest);
     const url = URL.createObjectURL(new Blob([`${JSON.stringify(manifests, null, 2)}\n`], { type: 'application/json;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = 'clouddash-cloud-evidence-manifests.json';
     anchor.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function openCloudIncident(video, verifyOnly = false) {
     setChecking(true);
@@ -2056,8 +2096,8 @@ function Decoder({ notify }) {
     <div className="page">
       <SectionHead
         title="Decoder - insurer verification"
-        copy="Compare a local incident video or a `.txt` fingerprint list with the append-only trusted cloud reference. Files stay in this browser during verification."
-        action={<div className="section-actions"><button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button><button className="button secondary" disabled={!fingerprints.length} onClick={downloadCloudFingerprints}><Download size={16} /> Download hashes</button></div>}
+        copy="Verify local video bytes or a signed JSON evidence manifest against the append-only cloud reference. Legacy TXT hashes remain review-only."
+        action={<div className="section-actions"><button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button><button className="button secondary" disabled={!modernFingerprints.length} onClick={downloadCloudFingerprints}><Download size={16} /> Download manifests</button></div>}
       />
       <section className="metrics">
         <Metric label="Cloud fingerprints" value={fingerprints.length} change="Timestamped SHA-256 records" icon={FileCheck2} tone="green" />
@@ -2070,7 +2110,8 @@ function Decoder({ notify }) {
           <div><span>Evidence manifest</span><h2>Verify a signed manifest</h2><p>Open a version-2 JSON manifest to resolve one exact session segment. Legacy raw-hash TXT files remain supported but do not prove session identity.</p></div>
           <input ref={inputRef} type="file" accept=".json,.txt,application/json,text/plain" hidden onChange={(event) => verifyFile(event.target.files?.[0])} />
           <button className="button primary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open evidence manifest'}</button>
-          {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} values exist in the trusted cloud stream.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
+          {selectedManifest && <p className="muted">Expected segment {selectedManifest.segmentId.slice(0, 8)} · session {selectedManifest.sessionId.slice(0, 8)} · sequence #{selectedManifest.sequence}</p>}
+          {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} supplied records passed trusted fingerprint, signature, and chain checks.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
           <div className="decoder-verifier">
             <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select the original local recording. CloudDash hashes its bytes in this browser and compares the result with Supabase; the video is never uploaded.</p>
             <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
@@ -2080,7 +2121,7 @@ function Decoder({ notify }) {
         </article>
         <article className="panel fingerprint-stream">
           <div className="panel-title"><div><h2>Cloud reference stream</h2><p>Persisted in Supabase with a capture timestamp and source.</p></div><Badge tone="success">Realtime</Badge></div>
-          {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>#{record.sequence}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone="info">{record.source}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip or import a .txt list from the Encoder." />}
+          {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>{record.session_id ? `${record.session_id.slice(0, 6)} · #${record.sequence}` : `legacy · #${record.sequence}`}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone={Number(record.version ?? 1) >= 2 ? 'info' : 'warning'}>{Number(record.version ?? 1) >= 2 ? 'session v2' : 'legacy'}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip from the Encoder." />}
         </article>
       </section>
       <section className="panel segment-table">
@@ -2766,12 +2807,13 @@ function CloudDash({ session }) {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       )}
-      {toast && (
-        <div className="toast">
-          <Check size={17} />
+      {toast && (() => {
+        const isError = /failed|failure|could not|error|mismatch|invalid|not found|remain queued|rejected|tamper/i.test(toast);
+        return <div className={isError ? "toast error" : "toast"}>
+          {isError ? <AlertTriangle size={17} /> : <Check size={17} />}
           {toast}
-        </div>
-      )}
+        </div>;
+      })()}
     </Layout>
   );
 }

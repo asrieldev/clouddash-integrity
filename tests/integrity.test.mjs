@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { canonicalFingerprintPayload, createEvidenceSegment, sha256, verifyEvidenceChain } from '../src/security/chain.js';
 import { exportPublicKey, generateDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from '../src/security/deviceKeys.js';
-import { dedupeQueueItems, queueItemId } from '../src/storage/offlineQueue.js';
+import { dedupeQueueItems, normalizeQueuedSegments, queueItemId } from '../src/storage/offlineQueue.js';
 import { expiredNormalVideos } from '../src/storage/localEvidenceStore.js';
 import { compareVideoHash } from '../src/security/verification.js';
 import { createEvidenceManifest, parseEvidenceManifest } from '../src/security/fingerprintFile.js';
@@ -54,6 +54,17 @@ test('queue identity is immutable per segment and isolated across sessions', () 
   assert.equal(dedupeQueueItems([{ fingerprint, state: 'QUEUED' }, { fingerprint, state: 'FAILED' }]).length, 1);
   assert.equal(queueItemId({ fingerprint }), 'segment-a');
   assert.notEqual(queueItemId({ fingerprint }), queueItemId({ fingerprint: { ...fingerprint, sessionId: 'session-b', segmentId: 'segment-b' } }));
+});
+
+test('outbox counts and retries only the selected device', () => {
+  const records = [
+    { id: 'a', fingerprint: { device_id: 'device-1', segmentId: 'a', capturedAt: '2026-09-28T10:00:00Z', sequence: 0 }, state: 'SENDING' },
+    { id: 'b', fingerprint: { deviceId: 'device-2', segmentId: 'b', capturedAt: '2026-09-28T10:00:01Z', sequence: 0 }, state: 'FAILED' },
+    { id: 'c', fingerprint: { deviceId: 'device-1', segmentId: 'c', capturedAt: '2026-09-28T10:00:02Z', sequence: 1 }, state: 'FAILED' }
+  ];
+  const selected = normalizeQueuedSegments(records, 'device-1');
+  assert.deepEqual(selected.map(item => item.id), ['a', 'c']);
+  assert.equal(selected[0].state, 'QUEUED');
 });
 
 test('a new capture session starts at sequence zero with no previous hash', async () => {

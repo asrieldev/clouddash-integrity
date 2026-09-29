@@ -23,6 +23,12 @@ function sequenceOf(item) {
   return Number(item.fingerprint?.sequence ?? item.sequence ?? -1);
 }
 
+function captureTimeOf(item) {
+  const value = item.fingerprint?.capturedAt ?? item.fingerprint?.captured_at ?? item.queuedAt;
+  const time = Date.parse(value || '');
+  return Number.isNaN(time) ? 0 : time;
+}
+
 export function queueItemId(item) {
   const fingerprint = item.fingerprint || item;
   return fingerprint.segmentId ?? fingerprint.segment_id ?? `${fingerprint.deviceId ?? fingerprint.device_id}:${fingerprint.sequence}`;
@@ -31,11 +37,17 @@ export function queueItemId(item) {
 export function dedupeQueueItems(items) {
   const byId = new Map();
   for (const item of items) byId.set(queueItemId(item), item);
-  return [...byId.values()].sort((a, b) => sequenceOf(a) - sequenceOf(b));
+  return [...byId.values()].sort((a, b) => captureTimeOf(a) - captureTimeOf(b) || sequenceOf(a) - sequenceOf(b));
 }
 
-export function allocateNextSequence(cloudSequence = -1, queuedSequence = -1) {
-  return Math.max(Number(cloudSequence ?? -1), Number(queuedSequence ?? -1)) + 1;
+export function normalizeQueuedSegments(records, deviceId) {
+  const normalized = records.map(item => ({
+    ...item,
+    fingerprint: item.fingerprint || item,
+    deviceId: item.deviceId || item.fingerprint?.deviceId || item.fingerprint?.device_id || item.device_id,
+    state: item.state === OUTBOX_STATES.SENDING ? OUTBOX_STATES.QUEUED : (item.state || OUTBOX_STATES.QUEUED)
+  }));
+  return dedupeQueueItems(deviceId ? normalized.filter(item => item.deviceId === deviceId) : normalized);
 }
 
 async function write(record) {
@@ -82,22 +94,11 @@ export async function listQueuedSegments(deviceId) {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  const normalized = records.map(item => ({
-    ...item,
-    fingerprint: item.fingerprint || item,
-    deviceId: item.deviceId || item.fingerprint?.deviceId || item.device_id,
-    state: item.state === OUTBOX_STATES.SENDING ? OUTBOX_STATES.QUEUED : (item.state || OUTBOX_STATES.QUEUED)
-  }));
-  return dedupeQueueItems(deviceId ? normalized.filter(item => item.deviceId === deviceId) : normalized);
+  return normalizeQueuedSegments(records, deviceId);
 }
 
-export async function getHighestQueuedSequence(deviceId) {
+export async function flushQueue(upload, onChange = () => {}, deviceId) {
   const queued = await listQueuedSegments(deviceId);
-  return queued.reduce((highest, item) => Math.max(highest, sequenceOf(item)), -1);
-}
-
-export async function flushQueue(upload, onChange = () => {}) {
-  const queued = await listQueuedSegments();
   const result = { sent: 0, failed: 0 };
   for (const item of queued) {
     const sending = { ...item, state: OUTBOX_STATES.SENDING, attempts: (item.attempts || 0) + 1, lastError: null };
