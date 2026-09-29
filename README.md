@@ -11,9 +11,14 @@ npm run start
 
 Open `http://127.0.0.1:4173`. The frontend includes rich demo data and stays usable when the API is not running. The API listens on port `3001`.
 
-## Demo access
+## Shared test access
 
-The UI opens directly into the Forensics Lab workspace. For the REST API, `POST /api/auth/login` with `{ "email": "analyst@clouddash.local" }` returns an analyst JWT. Use an `admin...` email prefix to receive the demo Admin role.
+The deployed app uses Supabase email/password authentication. A shared administrator is available for demonstrations and testing:
+
+- Email: `admin@clouddash.test`
+- Password: `CloudDashDemo2026!`
+
+These are intentionally public test credentials. Do not upload personal, confidential, or production evidence with this account.
 
 ## Included workflows
 
