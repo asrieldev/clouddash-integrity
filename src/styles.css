@@ -1769,3 +1769,58 @@ code {
   .fingerprint-list > div { grid-template-columns: 38px 1fr auto; gap: 8px; }
   .fingerprint-list code { grid-column: 2; }
 }
+
+/* Product UI refinement: quiet surfaces and deliberate operational hierarchy. */
+:root { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #edf0f4; background: #111214; }
+body, .focused-shell { background: #111214; }
+.app-sidepanel { width: 232px; padding: 24px 14px 17px; border-color: #2c2e34; background: #151619; }
+.focused-main { width: calc(100% - 232px); margin-left: 232px; }
+.app-sidepanel .app-identity { padding: 1px 8px; gap: 11px; }
+.app-identity .brand-mark { width: 32px; height: 32px; border-radius: 9px; background: #286b9b; color: #ecf7ff; }
+.app-identity small { color: #9ca0a9; font-size: 9px; letter-spacing: 1.35px; }
+.app-identity strong { color: #f6f7f9; font-size: 16px; font-weight: 700; }
+.side-navigation { gap: 3px; margin-top: 8px; }
+.side-navigation a { min-height: 40px; padding: 0 11px; border-radius: 7px; color: #b4b7bf; font-weight: 560; transition: background-color .16s ease, color .16s ease; }
+.side-navigation a:hover { background: #22242a; color: #fbfbfc; }
+.side-navigation a.active { background: #244b69; color: #f4f9ff; box-shadow: inset 3px 0 #85c9fb; }
+.side-status { border-color: #303237; color: #afb3bb; }
+.side-status .signal { background: #36d58b; box-shadow: 0 0 0 3px #143222; }
+.focused-main .page { max-width: 1420px; padding: 34px 32px 54px; }
+.section-head { margin-bottom: 26px; }
+.section-head h1 { color: #fafafa; font-size: 24px; font-weight: 680; }
+.section-head p, .panel-title p, .muted { color: #a7abb4; font-size: 12px; }
+.panel, .metric { border-color: #303238; background: #191b1f; box-shadow: none; }
+.panel { border-radius: 7px; padding: 20px; }
+.metric { min-height: 96px; border-radius: 7px; padding: 16px; }
+.metric-icon { background: #202f3c; color: #91c9f7; }
+.metric-icon.green { background: #173528; color: #64e3a4; }
+.metric-icon.amber { background: #3b2d14; color: #f3c66b; }
+.metric-icon.violet { background: #2e263d; color: #c6b5ef; }
+.metric strong { color: #f8f8f8; font-size: 22px; letter-spacing: 0; }
+.metric span, .metric small { color: #a7abb4; }
+.metric small { color: #65dba2; }
+.button { height: 36px; border-radius: 6px; font-weight: 650; }
+.primary { background: #2875b8; }
+.primary:hover { background: #3487cc; }
+.secondary { border-color: #3a3d44; background: #25272d; color: #eef0f4; }
+.secondary:hover { background: #30333a; }
+.text-button { color: #91c9f7; }
+.badge { border-radius: 999px; font-weight: 650; letter-spacing: .01em; }
+.table-wrap table { border-collapse: separate; border-spacing: 0; }
+.table-wrap th { color: #969ba5; font-weight: 650; }
+.table-wrap td { border-color: #303238; color: #d7d9de; }
+.table-wrap tbody tr:hover { background: #202227; }
+.fingerprint-list { border-color: #303238; }
+.fingerprint-list > div { border-color: #303238; }
+.fingerprint-list > div:hover { background: #202227; }
+.fingerprint-list code, code, .evidence-hash { color: #82c9ef !important; }
+.queue-callout, .alert-preferences { border-color: #3a4049; background: #1d2228; color: #c4c7cd; }
+.map-selection { border-color: #3b424c; background: #191c20ef; }
+.video-modal { background: #060708d9; }
+.video-modal-content { border-color: #3a3d44; background: #1a1c20; border-radius: 8px; }
+.empty { color: #9fa4ad; }
+@media (max-width: 780px) {
+  .app-sidepanel { width: 100%; padding: 14px 15px; }
+  .focused-main { width: 100%; margin-left: 0; }
+  .focused-main .page { padding: 24px 16px 38px; }
+}
