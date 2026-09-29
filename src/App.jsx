@@ -79,7 +79,18 @@ const NAV = [
   ["Live monitor", "/", Activity],
   ["Verify evidence", "/evidence", ShieldCheck],
   ["Driver capture", "/encoder", Camera],
+  ["Ingestion queue", "/queue", HardDriveUpload],
+  ["Incidents", "/incidents", AlertTriangle],
+  ["Alerts", "/alerts", Bell],
   ["Integrity log", "/integrity", FileCheck2],
+  ["Map view", "/map", MapPinned],
+  ["Analytics", "/analytics", Activity],
+  ["Cost monitoring", "/costs", Wallet],
+  ["System health", "/health", Gauge],
+  ["Audit logs", "/audit", Archive],
+  ["User management", "/users", UsersIcon],
+  ["Settings", "/settings", Settings],
+  ["Documentation", "/documentation", BookOpen],
 ];
 const chartData = [
   { d: "Mon", v: 18, c: 72 },
