@@ -83,12 +83,6 @@ const NAV = [
   ["Incidents", "/incidents", AlertTriangle],
   ["Alerts", "/alerts", Bell],
   ["Integrity log", "/integrity", FileCheck2],
-  ["Map view", "/map", MapPinned],
-  ["Analytics", "/analytics", Activity],
-  ["Cost monitoring", "/costs", Wallet],
-  ["System health", "/health", Gauge],
-  ["Audit logs", "/audit", Archive],
-  ["User management", "/users", UsersIcon],
   ["Settings", "/settings", Settings],
   ["Documentation", "/documentation", BookOpen],
 ];
