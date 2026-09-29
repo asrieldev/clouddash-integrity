@@ -913,7 +913,7 @@ function Encoder({ notify }) {
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
     lastClipUrlRef.current = previewUrl;
     const recordedClip = { url: previewUrl, sequence: segment.sequence, extension: fileInfo.extension };
-    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), capturedAt: Date.now(), hash: segment.sha256.slice(0, 12), size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', locked, preview: recordedClip }, ...rows].slice(0, 12));
+    setSegments((rows) => [{ seq: segment.sequence, time: new Date().toLocaleTimeString('en-GB'), capturedAt: Date.now(), hash: segment.sha256.slice(0, 12), fullHash: segment.sha256, size: `${Math.max(1, Math.round(blob.size / 1024))} KB`, state: result.queued ? 'Queued' : 'Sent', locked, preview: recordedClip }, ...rows].slice(0, 12));
     setLastClip(recordedClip);
   }
   async function importFingerprintFile(file) {
@@ -944,6 +944,15 @@ function Encoder({ notify }) {
     anchor.href = segment.preview.url;
     anchor.download = `dashcam-local-${segment.seq}.webm`;
     anchor.click();
+  }
+  function downloadFingerprint(segment) {
+    const hash = segment.fullHash || segment.hash;
+    const url = URL.createObjectURL(new Blob([`${hash}\n`], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `dashcam-fingerprint-${segment.seq}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
   function beginSegment(stream, source) {
     const mimeType = ['video/webm;codecs=vp8', 'video/webm'].find((type) => MediaRecorder.isTypeSupported(type));
@@ -1346,6 +1355,7 @@ function Encoder({ notify }) {
                 <th>Retention</th>
                 <th>Play</th>
                 <th>Download</th>
+                <th>Hash</th>
               </tr>
             </thead>
             <tbody>
@@ -1375,6 +1385,7 @@ function Encoder({ notify }) {
                     </IconButton>
                   </td>
                   <td><IconButton label={`Download local recording ${s.seq}`} onClick={() => downloadLocalClip(s)}><Download size={16} /></IconButton></td>
+                  <td><IconButton label={`Download SHA-256 fingerprint ${s.seq}`} onClick={() => downloadFingerprint(s)}><FileCheck2 size={16} /></IconButton></td>
                 </tr>
               ))}
             </tbody>
@@ -1769,12 +1780,21 @@ function Decoder({ notify }) {
     } catch (error) { notify(`Verification failed: ${error.message}`); }
     finally { setChecking(false); if (inputRef.current) inputRef.current.value = ''; }
   }
+  function downloadCloudFingerprints() {
+    const content = fingerprints.map((record) => record.sha256).join('\n');
+    const url = URL.createObjectURL(new Blob([content ? `${content}\n` : ''], { type: 'text/plain;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'clouddash-cloud-fingerprints.txt';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div className="page">
       <SectionHead
         title="Decoder - insurer verification"
         copy="Retrieve the cloud fingerprint stream and compare an incident fingerprint file without transferring the original video."
-        action={<button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button>}
+        action={<div className="section-actions"><button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button><button className="button secondary" disabled={!fingerprints.length} onClick={downloadCloudFingerprints}><Download size={16} /> Download hashes</button></div>}
       />
       <section className="metrics">
         <Metric label="Cloud fingerprints" value={fingerprints.length} change="Timestamped SHA-256 records" icon={FileCheck2} tone="green" />

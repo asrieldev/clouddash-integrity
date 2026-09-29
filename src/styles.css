@@ -1826,6 +1826,7 @@ body, .focused-shell { background: #111214; }
 .side-status .signal { background: #36d58b; box-shadow: 0 0 0 3px #143222; }
 .focused-main .page { max-width: 1420px; padding: 34px 32px 54px; }
 .section-head { margin-bottom: 26px; }
+.section-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .section-head h1 { color: #fafafa; font-size: 24px; font-weight: 680; }
 .section-head p, .panel-title p, .muted { color: #a7abb4; font-size: 12px; }
 .panel, .metric { border-color: #303238; background: #191b1f; box-shadow: none; }
