@@ -36,6 +36,7 @@ import {
   ChevronDown,
   ChevronLeft,
   CircleHelp,
+  CircleUserRound,
   Clock3,
   Cloud,
   Cpu,
@@ -184,7 +185,7 @@ function Layout({ children, alerts, setAlerts }) {
             </NavLink>
           ))}
         </nav>
-        <div className="side-status"><span className="signal" /> Secure sync</div>
+        <div className="side-status"><span className="side-profile" title="Signed-in analyst"><CircleUserRound size={16} /></span><span className="signal" /> Secure sync</div>
       </aside>
       <main className="focused-main">
         {children}

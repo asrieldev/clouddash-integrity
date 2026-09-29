@@ -1798,6 +1798,7 @@ body, .focused-shell { background: #111214; }
 .side-navigation a:hover { background: #22242a; color: #fbfbfc; }
 .side-navigation a.active { background: #244b69; color: #f4f9ff; box-shadow: inset 3px 0 #85c9fb; }
 .side-status { border-color: #303237; color: #afb3bb; }
+.side-profile { display: grid; place-items: center; width: 25px; height: 25px; margin-right: 2px; border: 1px solid #3d424a; border-radius: 50%; color: #cbd8e8; background: #22252a; }
 .side-status .signal { background: #36d58b; box-shadow: 0 0 0 3px #143222; }
 .focused-main .page { max-width: 1420px; padding: 34px 32px 54px; }
 .section-head { margin-bottom: 26px; }
