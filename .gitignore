@@ -3,4 +3,5 @@ dist
 .env
 uploads
 supabase/.temp
+tmp
 *.log
