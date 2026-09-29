@@ -3,7 +3,7 @@ import test from 'node:test';
 import { canonicalFingerprintPayload, createEvidenceSegment, sha256, verifyEvidenceChain } from '../src/security/chain.js';
 import { exportPublicKey, generateDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from '../src/security/deviceKeys.js';
 import { dedupeQueueItems, normalizeQueuedSegments, queueItemId } from '../src/storage/offlineQueue.js';
-import { expiredNormalVideos } from '../src/storage/localEvidenceStore.js';
+import { canDeleteLocalVideo, expiredNormalVideos } from '../src/storage/localEvidenceStore.js';
 import { compareVideoHash } from '../src/security/verification.js';
 import { createEvidenceManifest, parseEvidenceManifest } from '../src/security/fingerprintFile.js';
 
@@ -98,4 +98,10 @@ test('retention deletes expired normal video but preserves locked evidence', () 
     { id: 'locked', capturedAt: '2026-09-28T10:00:00Z', locked: true }
   ];
   assert.deepEqual(expiredNormalVideos(records, 3, Date.parse('2026-09-28T10:10:00Z')).map(record => record.id), ['normal']);
+});
+
+test('manual local deletion protects queued and locked evidence', () => {
+  assert.equal(canDeleteLocalVideo({ state: 'SENT', locked: false }), true);
+  assert.equal(canDeleteLocalVideo({ state: 'FAILED', locked: false }), false);
+  assert.equal(canDeleteLocalVideo({ state: 'SENT', locked: true }), false);
 });

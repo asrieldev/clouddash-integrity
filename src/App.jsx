@@ -63,6 +63,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Trash2,
   UserCog,
   Users as UsersIcon,
   Wallet,
@@ -78,7 +79,7 @@ import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/c
 import { getOrCreateDeviceKeyPair, getStoredDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from "./security/deviceKeys";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments } from "./evidenceRepository";
 import { enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
-import { getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
+import { canDeleteLocalVideo, deleteLocalVideo, getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
 import { createEvidenceManifest, parseEvidenceManifest, parseFingerprintFile } from "./security/fingerprintFile";
 import { compareVideoHash, verifyTrustedFingerprint } from "./security/verification";
 import { createCaptureSession, createIncident, downloadIncidentVideo, endCaptureSession, listFingerprints, listIncidentVideos, storeFingerprint, uploadIncidentVideo } from "./fingerprintRepository";
@@ -814,6 +815,7 @@ function Encoder({ notify }) {
   const [incidentAfter, setIncidentAfter] = useState(2);
   const [recordingSource, setRecordingSource] = useState('camera');
   const [activeSessionId, setActiveSessionId] = useState(null);
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState([]);
   const [outbox, setOutbox] = useState([]);
   const [storedBytes, setStoredBytes] = useState(0);
   const [sentCount, setSentCount] = useState(0);
@@ -890,6 +892,7 @@ function Encoder({ notify }) {
     if (!deviceId) return;
     const records = await listLocalVideos(deviceId);
     setSegments(records.map(toDisplaySegment));
+    setSelectedSegmentIds(current => current.filter(id => records.some(record => record.id === id && canDeleteLocalVideo(record))));
     setStoredBytes(await totalLocalBytes(deviceId));
     setOutbox(await listQueuedSegments(deviceId));
   }
@@ -1068,7 +1071,27 @@ function Encoder({ notify }) {
     if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
     const url = URL.createObjectURL(record.blob);
     lastClipUrlRef.current = url;
-    setLastClip({ url, sequence: record.sequence, extension: record.mimeType?.includes('mp4') ? 'mp4' : 'webm' });
+    setLastClip({ id: record.id, url, sequence: record.sequence, extension: record.mimeType?.includes('mp4') ? 'mp4' : 'webm' });
+  }
+
+  function toggleSegmentSelection(id) {
+    setSelectedSegmentIds(current => current.includes(id) ? current.filter(selectedId => selectedId !== id) : [...current, id]);
+  }
+
+  async function deleteSelectedLocalVideos() {
+    const selected = segments.filter(segment => selectedSegmentIds.includes(segment.id));
+    const removable = selected.filter(canDeleteLocalVideo);
+    if (!removable.length) return notify('Select an unlocked, cloud-acknowledged local recording first.');
+    if (!window.confirm(`Delete ${removable.length} selected local video${removable.length === 1 ? '' : 's'}? Cloud fingerprints will be retained.`)) return;
+    await Promise.all(removable.map(segment => deleteLocalVideo(segment.id)));
+    if (lastClip && removable.some(segment => segment.id === lastClip.id)) {
+      if (lastClipUrlRef.current) URL.revokeObjectURL(lastClipUrlRef.current);
+      lastClipUrlRef.current = null;
+      setLastClip(null);
+    }
+    setSelectedSegmentIds([]);
+    await refreshLocalEvidence();
+    notify(`${removable.length} local video${removable.length === 1 ? '' : 's'} deleted. Trusted cloud fingerprints were retained.`);
   }
 
   async function downloadLocalClip(segment) {
@@ -1536,14 +1559,16 @@ function Encoder({ notify }) {
             <h2>Local recordings on this device ({segments.length})</h2>
             <p>Videos are retained locally only. The cloud receives their timestamped fingerprints.</p>
           </div>
-          <span className="storage">
-            Browser storage: {(storedBytes / 1024 / 1024).toFixed(1)} MB used
-          </span>
+          <div className="section-actions">
+            <span className="storage">Browser storage: {(storedBytes / 1024 / 1024).toFixed(1)} MB used</span>
+            <button className="button danger" disabled={!selectedSegmentIds.length} onClick={deleteSelectedLocalVideos}><Trash2 size={16} /> Delete selected</button>
+          </div>
         </div>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
+                <th><input type="checkbox" aria-label="Select all deletable local recordings" checked={Boolean(segments.length) && segments.filter(canDeleteLocalVideo).length > 0 && segments.filter(canDeleteLocalVideo).every(segment => selectedSegmentIds.includes(segment.id))} onChange={(event) => setSelectedSegmentIds(event.target.checked ? segments.filter(canDeleteLocalVideo).map(segment => segment.id) : [])} /></th>
                 <th>Sequence</th>
                 <th>Captured</th>
                 <th>Size</th>
@@ -1558,6 +1583,7 @@ function Encoder({ notify }) {
             <tbody>
               {segments.map((s) => (
                 <tr key={s.id}>
+                  <td><input type="checkbox" aria-label={`Select local recording ${s.seq}`} checked={selectedSegmentIds.includes(s.id)} disabled={!canDeleteLocalVideo(s)} title={s.locked ? 'Locked incident evidence cannot be deleted locally.' : s.state !== 'SENT' ? 'Send the fingerprint before deleting its local video.' : 'Select local video'} onChange={() => toggleSegmentSelection(s.id)} /></td>
                   <td>
                     <b>#{s.seq}</b>
                     <small>Session {s.sessionId ? s.sessionId.slice(0, 8) : 'legacy'}</small>

@@ -51,6 +51,10 @@ export function deleteLocalVideo(id) {
   return transact('readwrite', store => store.delete(id));
 }
 
+export function canDeleteLocalVideo(record) {
+  return Boolean(record) && !record.locked && record.state === 'SENT';
+}
+
 export function expiredNormalVideos(records, retentionMinutes, now = Date.now()) {
   const cutoff = now - Number(retentionMinutes) * 60_000;
   return records.filter(record => !record.locked && new Date(record.capturedAt).getTime() < cutoff);
