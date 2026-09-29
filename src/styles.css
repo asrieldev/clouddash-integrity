@@ -1741,10 +1741,17 @@ code {
 .recorded-preview { position: relative; width: 100%; height: 100%; background: #020611; display: grid; }
 .recorded-preview video { width: 100%; height: 100%; object-fit: contain; }
 .recorded-preview span { position: absolute; left: 10px; bottom: 10px; padding: 5px 7px; color: #dbeafe; background: #081121d9; border-radius: 4px; font-size: 10px; }
-.video-modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: #030713cc; }
-.video-modal-content { width: min(880px, 100%); padding: 14px; border: 1px solid #2d3b50; border-radius: 8px; background: #101827; box-shadow: 0 24px 70px #000a; }
-.video-modal-content > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; color: #e7eef8; font-size: 13px; }
-.video-modal-content video { display: block; width: 100%; max-height: min(68vh, 560px); background: #000; }
+.video-modal { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: #060708df; backdrop-filter: blur(5px); }
+.video-modal-content { width: min(980px, 100%); padding: 0; overflow: hidden; border: 1px solid #3a3d44; border-radius: 8px; background: #1a1c20; box-shadow: 0 28px 80px #000b; }
+.video-modal-header { min-height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 15px 12px 18px; border-bottom: 1px solid #34373d; }
+.video-modal-header > div:first-child { display: grid; min-width: 0; gap: 3px; }
+.video-modal-header > div:last-child { display: flex; align-items: center; gap: 8px; }
+.video-modal-header span { color: #a3a8b1; font-size: 9px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+.video-modal-header b { overflow: hidden; color: #f5f6f8; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.video-player-stage { display: grid; place-items: center; max-height: min(70vh, 680px); min-height: 280px; padding: 16px; background: #08090b; }
+.video-player-stage video { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(min(70vh, 680px) - 32px); background: #000; outline: 1px solid #23262c; }
+.video-modal-footer { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 18px; border-top: 1px solid #34373d; color: #959ba5; font-size: 10px; }
+.video-modal-footer code { overflow: hidden; color: #82c9ef; text-overflow: ellipsis; white-space: nowrap; }
 .queue-callout, .alert-preferences { display: flex; align-items: center; gap: 9px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid #3b4c68; border-radius: 6px; color: #b9c8dc; background: #101a2d; font-size: 11px; line-height: 1.45; }
 .queue-callout svg { flex: 0 0 auto; color: #fbbf24; }
 .alert-preferences { justify-content: space-between; }

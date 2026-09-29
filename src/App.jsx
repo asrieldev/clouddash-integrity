@@ -606,14 +606,14 @@ function Evidence({ videos, setVideos, notify }) {
       if (playbackUrlRef.current) URL.revokeObjectURL(playbackUrlRef.current);
       if (video.localUrl) {
         playbackUrlRef.current = null;
-        setPlayback({ name: video.name, url: video.localUrl });
+        setPlayback({ name: video.name, url: video.localUrl, integrity: video.integrity, hash: video.hash });
         return;
       }
       if (!video.objectPath) throw new Error('This sample record has no stored video. Record a new clip first.');
       const blob = await downloadEvidenceSegment(video.objectPath);
       const url = URL.createObjectURL(blob);
       playbackUrlRef.current = url;
-      setPlayback({ name: video.name, url });
+      setPlayback({ name: video.name, url, integrity: video.integrity, hash: video.hash });
     } catch (error) {
       notify(`Could not play video: ${error.message}`);
     }
@@ -721,8 +721,20 @@ function Evidence({ videos, setVideos, notify }) {
       </section>
       {playback && <div className="video-modal" role="dialog" aria-modal="true" aria-label={`Play ${playback.name}`}>
         <article className="video-modal-content">
-          <div><b>{playback.name}</b><IconButton label="Close video player" onClick={() => setPlayback(null)}><X size={18} /></IconButton></div>
-          <video src={playback.url} controls autoPlay playsInline />
+          <header className="video-modal-header">
+            <div>
+              <span>Evidence preview</span>
+              <b>{playback.name}</b>
+            </div>
+            <div>
+              {playback.integrity && <Badge tone={playback.integrity === "Verified" ? "success" : "warning"}>{playback.integrity}</Badge>}
+              <IconButton label="Close video player" onClick={() => setPlayback(null)}><X size={18} /></IconButton>
+            </div>
+          </header>
+          <div className="video-player-stage">
+            <video src={playback.url} controls autoPlay playsInline />
+          </div>
+          {playback.hash && <footer className="video-modal-footer"><span>SHA-256</span><code>{playback.hash}</code></footer>}
         </article>
       </div>}
     </div>
