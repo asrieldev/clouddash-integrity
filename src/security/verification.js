@@ -1,4 +1,4 @@
-import { verifyEvidenceChain } from './chain.js';
+import { verifyEvidenceChain, sha256, stableJson } from './chain.js';
 import { verifyFingerprintSignature } from './deviceKeys.js';
 
 export function compareVideoHash(calculatedHash, trustedHash) {
@@ -10,6 +10,7 @@ export function compareVideoHash(calculatedHash, trustedHash) {
 
 export async function verifyTrustedFingerprint(reference, allRecords) {
   if (!reference) return { status: 'FINGERPRINT_NOT_FOUND', valid: false };
+  if (Number(reference.version) >= 3 && await sha256(stableJson(reference.perceptual)) !== (reference.perceptualHash ?? reference.perceptual_hash)) return { status: 'PERCEPTUAL_HASH_MISMATCH', valid: false };
   const publicKey = reference.devices?.public_key;
   const signatureValid = publicKey && reference.signature
     ? await verifyFingerprintSignature(publicKey, reference, reference.signature)

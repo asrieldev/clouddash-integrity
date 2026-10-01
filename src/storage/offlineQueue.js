@@ -70,6 +70,8 @@ async function remove(id) {
   });
 }
 
+export const acknowledgeQueuedSegment = remove;
+
 export async function enqueueSegment(segment) {
   const fingerprint = segment.fingerprint || segment;
   const id = queueItemId({ fingerprint });
@@ -105,20 +107,24 @@ export async function clearQueuedSegments(deviceId) {
 
 export async function flushQueue(upload, onChange = () => {}, deviceId) {
   const queued = await listQueuedSegments(deviceId);
+  return drainOutbox(queued, { write, remove }, upload, onChange);
+}
+
+export async function drainOutbox(queued, storage, upload, onChange = () => {}) {
   const retryable = queued.filter(item => item.errorCode !== 'EVIDENCE_IDENTITY_CONFLICT');
   const result = { sent: 0, failed: 0, skipped: queued.length - retryable.length, failures: [] };
   for (const item of retryable) {
     const sending = { ...item, state: OUTBOX_STATES.SENDING, attempts: (item.attempts || 0) + 1, lastError: null };
-    await write(sending);
+    await storage.write(sending);
     await onChange(sending);
     try {
       await upload(sending);
-      await remove(item.id);
+      await storage.remove(item.id);
       result.sent += 1;
       await onChange({ ...sending, state: 'SENT' });
     } catch (error) {
       const failed = { ...sending, state: OUTBOX_STATES.FAILED, lastError: error?.message || 'Transmission failed', errorCode: error?.code || null };
-      await write(failed);
+      await storage.write(failed);
       result.failed += 1;
       result.failures.push(failed);
       await onChange(failed);

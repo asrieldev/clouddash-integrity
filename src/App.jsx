@@ -1,3 +1,5 @@
+import VideoMetricResults from './VideoMetricResults.jsx';
+import { verifyVideoMetrics } from './matching/verifyMetrics.js';
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import {
@@ -78,16 +80,20 @@ import { supabase } from "./supabase";
 import { createEvidenceSegment, sha256, verifyEvidenceChain } from "./security/chain";
 import { getOrCreateDeviceKeyPair, getStoredDeviceKeyPair, signFingerprint, verifyFingerprintSignature } from "./security/deviceKeys";
 import { createDevice, downloadEvidenceSegment, listEvidenceSegments } from "./evidenceRepository";
-import { clearQueuedSegments, enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
+import { acknowledgeQueuedSegment, clearQueuedSegments, enqueueSegment, flushQueue, listQueuedSegments } from "./storage/offlineQueue";
 import { canDeleteLocalVideo, clearLocalVideos, deleteLocalVideo, getLocalVideo, listLocalVideos, purgeExpiredVideos, saveLocalVideo, totalLocalBytes, updateLocalVideo } from "./storage/localEvidenceStore";
 import { createEvidenceManifest, parseEvidenceManifest, parseFingerprintFile } from "./security/fingerprintFile";
 import { compareVideoHash, verifyTrustedFingerprint } from "./security/verification";
 import { createCaptureSession, createIncident, downloadIncidentVideo, endCaptureSession, listFingerprints, listIncidentVideos, storeFingerprint, uploadIncidentVideo } from "./fingerprintRepository";
 import { subscribeToEvidence } from "./realtime";
+import VerificationHistory from './VerificationHistory.jsx';
+import { recordVerification } from './verificationHistory';
+import EvaluationLab from './EvaluationLab';
+import { extractVideoFingerprints } from './matching/video';
 
 const NAV = [
   { label: "Encoder / transmitter", items: [["Driver capture", "/encoder", Camera]] },
-  { label: "Decoder / insurer", items: [["Live monitor", "/", Activity], ["Verify evidence", "/decoder", ShieldCheck]] },
+  { label: "Decoder / insurer", items: [["Live monitor", "/", Activity], ["Verify evidence", "/decoder", ShieldCheck], ["Integrity & history", "/integrity", FileCheck2], ["Evaluation lab", "/evaluation", Gauge]] },
   { label: "Operations", items: [["Ingestion queue", "/queue", HardDriveUpload], ["Settings", "/settings", Settings], ["Documentation", "/documentation", BookOpen]] },
 ];
 const chartData = [
@@ -312,6 +318,7 @@ function Monitor({ videos, notify }) {
         <Metric label="Legacy records" value={legacyCount} change="No capture-session guarantee" icon={AlertTriangle} tone="amber" />
         <Metric label="Capture devices" value={new Set(records.map(record => record.deviceId)).size} change="Devices in cloud stream" icon={Camera} tone="violet" />
       </section>
+      <VerificationHistory />
       <section className="panel monitor-sessions">
         <div className="panel-title">
           <div><h2>Evidence sessions</h2><p>Cloud records grouped by their signed capture-session identity.</p></div>
@@ -1009,7 +1016,10 @@ function Encoder({ notify }) {
     const incidentId = shouldLock ? incidentIdRef.current : null;
     if (shouldLock) incidentRemainingRef.current -= 1;
     if (incidentRemainingRef.current === 0) setIncidentActive(false);
-    const segment = await createEvidenceSegment({ ...identity, sessionId, segmentId, sequence, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked: shouldLock, source: 'browser-media-recorder', ...fileInfo } });
+    let perceptual;
+    try { perceptual = await extractVideoFingerprints(blob); }
+    catch (error) { perceptual = { schema: 'clouddash-perceptual-v1', frames: [], error: error.message }; notify(`Exact evidence saved; perceptual extraction unavailable: ${error.message}`); }
+    const segment = await createEvidenceSegment({ version: 3, perceptual, ...identity, sessionId, segmentId, sequence, capturedAt, bytes: blob.size, contentHash: await sha256(new Uint8Array(await blob.arrayBuffer())), previousHash: previousHashRef.current, metadata: { locked: shouldLock, source: 'browser-media-recorder', ...fileInfo } });
     previousHashRef.current = segment.chainHash;
     const fingerprint = { ...segment, sessionStartedAt: captureSessionStartedAtRef.current || capturedAt, signatureAlgorithm: 'ECDSA_P256_SHA256', source: 'recorded-video-segment' };
     fingerprint.signature = await signFingerprint(identity.keys.privateKey, fingerprint);
@@ -1035,6 +1045,8 @@ function Encoder({ notify }) {
       state: 'LOCAL'
     };
     await saveLocalVideo(localRecord);
+    // Durable write-ahead outbox: a closed tab during an online send remains retryable.
+    await enqueueSegment({ kind: 'fingerprint', fingerprint, localVideoId: localRecord.id, incidentId });
     let result;
     if (offlineRef.current || !navigator.onLine) {
       await enqueueSegment({ kind: 'fingerprint', fingerprint, localVideoId: localRecord.id, incidentId });
@@ -1063,6 +1075,7 @@ function Encoder({ notify }) {
         notify(`Fingerprint queued: ${error.message}`);
       }
     }
+    if (!result.queued) await acknowledgeQueuedSegment(segmentId);
     await refreshLocalEvidence();
     await openLocalClip(localRecord);
     return result;
@@ -1961,6 +1974,7 @@ function Integrity({ notify }) {
   return (
     <div className="page">
       <SectionHead title="Integrity log" copy="Audit the exact hash chains stored for each driver device." action={<button className="button primary" onClick={runAudit} disabled={running}><ShieldCheck size={16} /> {running ? 'Auditing...' : 'Run audit'}</button>} />
+      <VerificationHistory />
       <section className="metrics">
         <Metric label="Stored segments" value={segments.length} change="Evidence records checked" icon={FileVideo} />
         <Metric label="Verified sessions" value={`${validChains}/${modernAudits.length}`} change={modernAudits.length ? 'Session chains and signatures checked' : 'No version-2 sessions yet'} icon={ShieldCheck} tone="green" />
@@ -1982,12 +1996,19 @@ function Decoder({ notify }) {
   const [fingerprints, setFingerprints] = useState([]);
   const [incidentVideos, setIncidentVideos] = useState([]);
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState(null);
-  const [videoResult, setVideoResult] = useState(null);
+  const [result, updateResult] = useState(null);
+  const [videoResult, updateVideoResult] = useState(null);
+  function persistAttempt(kind, value) {
+    recordVerification(kind, value).then(row => { if (row.syncError) notify(`Verification saved locally; cloud sync pending: ${row.syncError}`); }).catch(error => notify(`Verification log could not be saved: ${error.message}`));
+  }
+  function setResult(value) { updateResult(value); persistAttempt('manifest', value); }
+  function setVideoResult(value) { updateVideoResult(value); persistAttempt('video', value); }
   const [realtimeState, setRealtimeState] = useState('CONNECTING');
   const [cloudPlayback, setCloudPlayback] = useState(null);
   const [incidentChecks, setIncidentChecks] = useState({});
   const [selectedManifest, setSelectedManifest] = useState(null);
+  const [metricReferenceId, setMetricReferenceId] = useState('');
+  const loggedIncidentChecks = useRef(new Map());
   const inputRef = useRef(null);
   const videoInputRef = useRef(null);
   const incidentGroups = useMemo(() => Object.values(incidentVideos.reduce((groups, video) => {
@@ -2028,6 +2049,11 @@ function Decoder({ notify }) {
       }
     }));
     setIncidentChecks(Object.fromEntries(checks));
+    for (const [id, check] of checks) {
+      if (loggedIncidentChecks.current.get(id) === check.status) continue;
+      loggedIncidentChecks.current.set(id, check.status);
+      persistAttempt('incident', { ...check, name: videos.find(video => video.id === id)?.storage_path || id });
+    }
   }
   async function reload() {
     if (!supabase) return;
@@ -2087,7 +2113,7 @@ function Decoder({ notify }) {
       setResult({ status, total: imported.length, matched: matched.length, missing });
       setSelectedManifest(null);
       notify(status === 'VERIFIED' ? 'Every supplied fingerprint passed cloud, signature, and chain verification.' : `${status}: fingerprint verification failed.`);
-    } catch (error) { notify(`Verification failed: ${error.message}`); }
+    } catch (error) { setResult({ status: 'ERROR', name: file.name, reason: error.message, matched: 0, total: 0, missing: [] }); notify(`Verification failed: ${error.message}`); }
     finally { setChecking(false); if (inputRef.current) inputRef.current.value = ''; }
   }
   async function verifyVideo(file) {
@@ -2098,17 +2124,19 @@ function Decoder({ notify }) {
       const segmentId = file.name.match(/([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.(?:webm|mp4)$/i)?.[1];
       const reference = selectedManifest
         ? fingerprints.find(record => record.segment_id === selectedManifest.segmentId)
-        : (segmentId ? fingerprints.find(record => record.segment_id === segmentId) : null) || fingerprints.find(record => record.sha256 === observedHash);
+        : (metricReferenceId ? fingerprints.find(record => record.segment_id === metricReferenceId) : null) || (segmentId ? fingerprints.find(record => record.segment_id === segmentId) : null) || fingerprints.find(record => record.sha256 === observedHash);
       if (selectedManifest && reference && (reference.session_id !== selectedManifest.sessionId || reference.device_id !== selectedManifest.deviceId || reference.sequence !== selectedManifest.sequence)) {
         setVideoResult({ name: file.name, observedHash, status: 'SESSION_MISMATCH', reference, reason: 'The selected manifest does not identify this trusted session segment.' });
         return;
       }
       const hashCheck = compareVideoHash(observedHash, reference?.sha256);
-      const trust = hashCheck.valid ? await verifyTrustedFingerprint(reference, fingerprints) : hashCheck;
+      const referenceTrust = reference ? await verifyTrustedFingerprint(reference, fingerprints) : null;
+      const trust = hashCheck.valid ? referenceTrust : hashCheck;
+      const metrics = await verifyVideoMetrics(file, reference, referenceTrust?.valid);
       const status = hashCheck.valid ? trust.status : hashCheck.status;
-      setVideoResult({ name: file.name, observedHash, status, reference, signatureValid: trust.signatureValid, chain: trust.chain, reason: trust.reason });
+      setVideoResult({ name: file.name, observedHash, status, reference, metrics, signatureValid: trust.signatureValid, chain: trust.chain, reason: trust.reason });
       notify(status === 'VERIFIED' ? 'Video verified against its signed cloud fingerprint and hash chain.' : `${status}: ${trust.reason || 'Evidence verification failed.'}`);
-    } catch (error) { notify(`Video verification failed: ${error.message}`); }
+    } catch (error) { setVideoResult({ status: 'ERROR', name: file.name, reason: error.message }); notify(`Video verification failed: ${error.message}`); }
     finally { setChecking(false); if (videoInputRef.current) videoInputRef.current.value = ''; }
   }
   function downloadCloudFingerprints() {
@@ -2125,6 +2153,8 @@ function Decoder({ notify }) {
     try {
       const check = await inspectIncidentVideo(video, fingerprints);
       const { blob, ...storedCheck } = check;
+      const referenceTrust = check.reference ? await verifyTrustedFingerprint(check.reference, fingerprints) : null;
+      storedCheck.metrics = await verifyVideoMetrics(blob, check.reference, referenceTrust?.valid);
       setIncidentChecks(current => ({ ...current, [video.id]: storedCheck }));
       setVideoResult({ name: video.storage_path.split('/').at(-1), ...storedCheck });
       if (!verifyOnly) {
@@ -2132,7 +2162,7 @@ function Decoder({ notify }) {
         setCloudPlayback({ url: URL.createObjectURL(blob), name: video.storage_path.split('/').at(-1) });
       }
       notify(check.status === 'VERIFIED' ? 'Cloud incident video passed hash, signature, and chain verification.' : `${check.status}: incident verification failed.`);
-    } catch (error) { notify(`Could not retrieve incident video: ${error.message}`); }
+    } catch (error) { setVideoResult({ status: 'ERROR', name: video.storage_path, reason: error.message }); notify(`Could not retrieve incident video: ${error.message}`); }
     finally { setChecking(false); }
   }
   async function downloadCloudIncident(video) {
@@ -2156,6 +2186,7 @@ function Decoder({ notify }) {
         <Metric label="Stream state" value={realtimeState === 'SUBSCRIBED' ? 'Live' : 'Offline'} change={`Supabase Realtime ${realtimeState.toLowerCase()}`} icon={Activity} />
         <Metric label="Last verification" value={videoResult?.status || result?.status || '--'} change={videoResult?.name || (result ? `${result.matched}/${result.total} hashes found` : 'No file checked')} icon={ShieldCheck} tone={(videoResult?.status || result?.status) === 'VERIFIED' ? 'green' : 'amber'} />
       </section>
+      <VerificationHistory />
       <section className="decoder-layout">
         <article className="panel decoder-intake">
           <FileCheck2 size={25} />
@@ -2165,7 +2196,8 @@ function Decoder({ notify }) {
           {selectedManifest && <p className="muted">Expected segment {selectedManifest.segmentId.slice(0, 8)} · session {selectedManifest.sessionId.slice(0, 8)} · sequence #{selectedManifest.sequence}</p>}
           {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} supplied records passed trusted fingerprint, signature, and chain checks.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
           <div className="decoder-verifier">
-            <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select the original local recording. CloudDash hashes its bytes in this browser and compares the result with Supabase; the video is never uploaded.</p>
+            <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select a video downloaded from the recorder, including an edited copy. CloudDash checks exact integrity and all fingerprint metrics against the recorded reference in this browser; the video is never uploaded.</p>
+            <label>Original recorded segment<select aria-label="Original recorded segment" disabled={checking || !!selectedManifest} value={metricReferenceId} onChange={event => setMetricReferenceId(event.target.value)}><option value="">Automatic: filename, SHA-256 or selected manifest</option>{modernFingerprints.map(record => <option key={record.segment_id} value={record.segment_id}>{record.session_id.slice(0,8)} · #{record.sequence} · {new Date(record.captured_at).toLocaleString()}</option>)}</select></label>
             <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
             <button className="button secondary" disabled={checking} onClick={() => videoInputRef.current?.click()}><FileVideo size={16} /> {checking ? 'Checking...' : 'Open video file'}</button>
             {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'VERIFIED' : videoResult.status === 'LEGACY_EVIDENCE' ? 'REVIEW' : 'FAILED'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
@@ -2176,6 +2208,7 @@ function Decoder({ notify }) {
           {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>{record.session_id ? `${record.session_id.slice(0, 6)} · #${record.sequence}` : `legacy · #${record.sequence}`}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone={Number(record.version ?? 1) >= 2 ? 'info' : 'warning'}>{Number(record.version ?? 1) >= 2 ? 'session v2' : 'legacy'}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip from the Encoder." />}
         </article>
       </section>
+      <VideoMetricResults result={videoResult} />
       <section className="panel segment-table">
         <div className="panel-title"><div><h2>Protected incident videos</h2><p>Only driver-locked evidence is copied to private Supabase Storage.</p></div><Badge tone="neutral">Private</Badge></div>
         {incidentGroups.length ? <div className="table-wrap incident-evidence-table"><table><thead><tr><th>Evidence</th><th>Device / sequence</th><th>Custody timestamps</th><th>Size</th><th>Hash comparison</th><th>Cryptographic checks</th><th>Result</th><th>Actions</th></tr></thead><tbody>{incidentGroups.map(group => {
@@ -2780,7 +2813,12 @@ function AuthGate({ children }) {
   return <main className="auth-gate"><form className="auth-card" onSubmit={submit}><div className="brand-mark"><ShieldCheck size={22}/></div><h1>CloudDash Integrity</h1><p>{mode === 'sign-in' ? 'Sign in to your evidence workspace.' : 'Create an analyst workspace account.'}</p>{mode === 'sign-up' && <label>Name<input required value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Your name"/></label>}<label>Email<input required type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com"/></label><label>Password<input required minLength="6" type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 6 characters"/></label>{message && <div className="auth-message">{message}</div>}<button className="button primary full" disabled={busy}>{busy ? 'Please wait...' : mode === 'sign-in' ? 'Sign in' : 'Create account'}</button><button type="button" className="text-button auth-switch" onClick={()=>{setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');setMessage('')}}>{mode === 'sign-in' ? 'Need an account? Create one' : 'Already have an account? Sign in'}</button></form></main>;
 }
 
-function App() { return <AuthGate>{(session) => <CloudDash session={session} />}</AuthGate>; }
+function App() {
+  const location = useLocation();
+  const [localMessage, setLocalMessage] = useState('');
+  if (location.pathname === '/evaluation-local') return <main className="local-evaluation"><NavLink className="button secondary" to="/">Sign in to cloud workspace</NavLink>{localMessage && <p role="status">{localMessage}</p>}<EvaluationLab localOnly notify={setLocalMessage} /></main>;
+  return <AuthGate>{(session) => <CloudDash session={session} />}</AuthGate>;
+}
 
 function CloudDash({ session }) {
   const [videos, setVideos] = useState(initialVideos);
@@ -2854,6 +2892,7 @@ function CloudDash({ session }) {
             element={<Integrity videos={videos} notify={notify} />}
           />
           <Route path="/decoder" element={<Decoder notify={notify} />} />
+          <Route path="/evaluation" element={<EvaluationLab notify={notify} />} />
           <Route path="/settings" element={<SettingsPage notify={notify} />} />
           <Route path="/documentation" element={<Documentation />} />
           <Route path="*" element={<Navigate to="/" replace />} />

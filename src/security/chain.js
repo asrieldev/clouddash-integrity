@@ -35,6 +35,7 @@ export function canonicalChainPayload(record) {
     payload.sessionId = requiredText(record.sessionId ?? record.session_id, 'sessionId');
     payload.segmentId = requiredText(record.segmentId ?? record.segment_id, 'segmentId');
   }
+  if (version >= 3) payload.perceptualHash = requiredText(record.perceptualHash ?? record.perceptual_hash, 'perceptualHash');
   return JSON.stringify({
     ...payload,
     sequence: Number(record.sequence),
@@ -52,11 +53,18 @@ export function canonicalFingerprintPayload(record) {
   });
 }
 
-export async function createEvidenceSegment({ version = EVIDENCE_VERSION, workspaceId, deviceId, sessionId, segmentId, sequence, capturedAt, bytes, contentHash, previousHash = null, metadata = {} }) {
+export async function createEvidenceSegment({ version = EVIDENCE_VERSION, workspaceId, deviceId, sessionId, segmentId, sequence, capturedAt, bytes, contentHash, previousHash = null, metadata = {}, perceptual = null }) {
   const segmentHash = contentHash || await sha256(JSON.stringify(metadata));
-  const base = { version, workspaceId, deviceId, sessionId, segmentId, sequence, capturedAt, bytes, sha256: segmentHash, previousHash, metadata };
+  const base = { version, workspaceId, deviceId, sessionId, segmentId, sequence, capturedAt, bytes, sha256: segmentHash, previousHash, metadata, ...(version >= 3 ? { perceptual, perceptualHash: await sha256(stableJson(perceptual)) } : {}) };
   const chainHash = await sha256(canonicalChainPayload(base));
   return { ...base, chainHash };
+}
+
+// jsonb reorders object keys. Hash a recursively canonicalized representation.
+export function stableJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') return '{' + Object.keys(value).sort().map(key => JSON.stringify(key) + ':' + stableJson(value[key])).join(',') + '}';
+  return JSON.stringify(value);
 }
 
 export async function verifyEvidenceChain(segments) {

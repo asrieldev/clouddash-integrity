@@ -2,6 +2,31 @@
 
 CloudDash is a hybrid dashcam integrity prototype for insurance evidence. Supabase Auth is authoritative; PostgreSQL stores trusted fingerprints and private Storage holds only driver-locked incident video.
 
+## Verification history and video evaluation
+
+The Decoder now records successful checks, mismatches, missing references and processing errors in **Integrity & history**, also visible on the monitor and Decoder. Attempts are written to a per-user browser outbox before cloud sync. The displayed **reliability** is the exact-video pass rate: `VERIFIED / completed video checks`. Missing references and mismatches lower this rate; processing errors are counted separately. It is not a probability of authenticity, and manifest/perceptual checks do not increase it. These are client-reported audit attempts, not server-attested verdicts.
+
+Open **Evaluation lab** for temporal alignment, perceptual/fuzzy metrics, threshold sweeps, anomaly positions and JSON reports. **Generated test videos** includes playable/downloadable examples and a **Load all 23 test scenarios** button. The bundled videos are synthetic FFmpeg patterns, clearly labelled; they are not real dashcam footage. The lab is also available without an account at `/evaluation-local` for local-only benchmarking; cloud references and cloud history remain authenticated.
+
+New recordings use signed version-3 fingerprints that bind frame profiles to the exact SHA-256 evidence chain. Older recordings remain verifiable by SHA-256, but cannot acquire perceptual fingerprints without their original video. A `CONTENT_MATCH` can identify a transformed clip while its exact-byte integrity remains unverified. Never equate visual similarity with `VERIFIED`.
+
+- [Measured synthetic results and failure analysis](docs/evaluation/RESULTS.md)
+- [Evaluation procedure, metrics and limitations](docs/EVALUATION.md)
+- [All quantitative measurements (CSV)](docs/evaluation/results.csv)
+- [Fuzzy-hash results and thresholds](docs/evaluation/fuzzy-results.json)
+
+Reproduce the full benchmark (FFmpeg is installed as a pinned development dependency):
+
+```powershell
+npm ci
+npm test
+npm run evaluate -- --out tmp/my-evaluation --sweep
+# Use two different real trips for a more useful dataset (12-second excerpts):
+npm run evaluate -- --source C:/videos/trip-a.mp4 --other C:/videos/trip-b.mp4 --out tmp/real-trips --sweep
+```
+
+The command writes the original, all transformed videos, a labelled `manifest.json`, `results.json`, and `results.csv`. Use a new output directory for each run. Supply `--ffmpeg <path>` if using your own FFmpeg. Browser HEVC support depends on the browser; the CLI tests HEVC through FFmpeg. Apply every migration, including `20260930081536_verification_and_matching.sql`, before deploying the new frontend.
+
 ## Complete first-time configuration
 
 ### 1. Install the development tools

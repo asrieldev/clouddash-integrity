@@ -8,7 +8,9 @@
     "server": "node server/index.js",
     "start": "concurrently \"npm run server\" \"npm run dev\"",
     "build": "vite build",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "evaluate": "node scripts/evaluate-videos.mjs",
+    "postinstall": "node scripts/patch-tlsh.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.1",
@@ -20,11 +22,15 @@
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5",
     "recharts": "^2.15.0",
-    "three": "^0.186.1"
+    "ssdeep.js": "0.0.3",
+    "three": "^0.186.1",
+    "tlsh": "1.0.8"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.2",
+    "fake-indexeddb": "6.2.4",
+    "ffmpeg-static": "5.2.0",
     "vite": "^6.1.0"
   }
 }

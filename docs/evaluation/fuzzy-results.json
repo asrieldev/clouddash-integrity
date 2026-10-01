@@ -1,0 +1,402 @@
+{
+  "results": [
+    {
+      "file": "authentic.mp4",
+      "scenario": "authentic",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 100,
+      "tlshDistance": 0,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 299.2643
+    },
+    {
+      "file": "trim-start.mp4",
+      "scenario": "trim-start",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 218,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 200.9434
+    },
+    {
+      "file": "trim-end.mp4",
+      "scenario": "trim-end",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 243,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 190.74800000000005
+    },
+    {
+      "file": "extract.mp4",
+      "scenario": "extract",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 261,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 121.47090000000003
+    },
+    {
+      "file": "shift.mp4",
+      "scenario": "shift",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 166,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 255.56420000000003
+    },
+    {
+      "file": "slow.mp4",
+      "scenario": "slow",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 191,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 290.42920000000004
+    },
+    {
+      "file": "fast.mp4",
+      "scenario": "fast",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 210,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 286.01269999999977
+    },
+    {
+      "file": "fps.mp4",
+      "scenario": "fps",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 203,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 180.4281000000001
+    },
+    {
+      "file": "missing.mp4",
+      "scenario": "missing",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 178,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 237.8792000000003
+    },
+    {
+      "file": "duplicate.mp4",
+      "scenario": "duplicate",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 169,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 244.9023000000002
+    },
+    {
+      "file": "reorder.mp4",
+      "scenario": "reorder",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 167,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 254.35840000000007
+    },
+    {
+      "file": "hevc.mp4",
+      "scenario": "hevc",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 266,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 130.41840000000002
+    },
+    {
+      "file": "bitrate.mp4",
+      "scenario": "bitrate",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 354,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 71.77880000000005
+    },
+    {
+      "file": "resolution.mp4",
+      "scenario": "resolution",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 319,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 94.82099999999991
+    },
+    {
+      "file": "compression.mp4",
+      "scenario": "compression",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 378,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 54.40390000000025
+    },
+    {
+      "file": "brightness.mp4",
+      "scenario": "brightness",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 219,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 231.57469999999967
+    },
+    {
+      "file": "contrast.mp4",
+      "scenario": "contrast",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 162,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 279.4575
+    },
+    {
+      "file": "salt-pepper.mp4",
+      "scenario": "salt-pepper",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 453,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 1810.2655
+    },
+    {
+      "file": "noise.mp4",
+      "scenario": "noise",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 389,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 1301.5830999999998
+    },
+    {
+      "file": "overlay.mp4",
+      "scenario": "overlay",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 225,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 252.16689999999926
+    },
+    {
+      "file": "crop.mp4",
+      "scenario": "crop",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 208,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 295.85339999999997
+    },
+    {
+      "file": "other-trip.mp4",
+      "scenario": "other-trip",
+      "expected": false,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 320,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 576.5510000000004
+    },
+    {
+      "file": "partial.mp4",
+      "scenario": "partial",
+      "expected": true,
+      "reference": "reference.mp4",
+      "ssdeepSimilarity": 0,
+      "tlshDistance": 217,
+      "tlshError": null,
+      "implementation": "ssdeep.js 0.0.3 / tlsh 1.0.8 (legacy 70-character digest)",
+      "processingMs": 488.47730000000047
+    }
+  ],
+  "thresholds": [
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 10,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 25,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 50,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 75,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 90,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "ssdeepSimilarity",
+      "threshold": 100,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 0,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 25,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 50,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 100,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 150,
+      "tp": 1,
+      "fp": 0,
+      "tn": 1,
+      "fn": 21,
+      "precision": 1,
+      "recall": 0.045454545454545456,
+      "f1": 0.08695652173913043
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 200,
+      "tp": 7,
+      "fp": 0,
+      "tn": 1,
+      "fn": 15,
+      "precision": 1,
+      "recall": 0.3181818181818182,
+      "f1": 0.4827586206896552
+    },
+    {
+      "metric": "tlshDistance",
+      "threshold": 300,
+      "tp": 17,
+      "fp": 0,
+      "tn": 1,
+      "fn": 5,
+      "precision": 1,
+      "recall": 0.7727272727272727,
+      "f1": 0.8717948717948718
+    }
+  ]
+}

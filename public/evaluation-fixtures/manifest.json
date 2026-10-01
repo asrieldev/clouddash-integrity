@@ -1,0 +1,146 @@
+{
+  "schema": "clouddash-dataset-v1",
+  "synthetic": true,
+  "reference": "reference.mp4",
+  "description": "Synthetic FFmpeg test patterns; these are not real driving footage.",
+  "cases": [
+    {
+      "file": "authentic.mp4",
+      "scenario": "authentic",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "trim-start.mp4",
+      "scenario": "trim-start",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "trim-end.mp4",
+      "scenario": "trim-end",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "extract.mp4",
+      "scenario": "extract",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "shift.mp4",
+      "scenario": "shift",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "slow.mp4",
+      "scenario": "slow",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "fast.mp4",
+      "scenario": "fast",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "fps.mp4",
+      "scenario": "fps",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "missing.mp4",
+      "scenario": "missing",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "duplicate.mp4",
+      "scenario": "duplicate",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "reorder.mp4",
+      "scenario": "reorder",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "hevc.mp4",
+      "scenario": "hevc",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "bitrate.mp4",
+      "scenario": "bitrate",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "resolution.mp4",
+      "scenario": "resolution",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "compression.mp4",
+      "scenario": "compression",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "brightness.mp4",
+      "scenario": "brightness",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "contrast.mp4",
+      "scenario": "contrast",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "salt-pepper.mp4",
+      "scenario": "salt-pepper",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "noise.mp4",
+      "scenario": "noise",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "overlay.mp4",
+      "scenario": "overlay",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "crop.mp4",
+      "scenario": "crop",
+      "expected": true,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "other-trip.mp4",
+      "scenario": "other-trip",
+      "expected": false,
+      "reference": "reference.mp4"
+    },
+    {
+      "file": "partial.mp4",
+      "scenario": "partial",
+      "expected": true,
+      "reference": "reference.mp4"
+    }
+  ]
+}

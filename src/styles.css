@@ -1875,3 +1875,21 @@ body, .focused-shell { background: #111214; }
   .focused-main { width: 100%; margin-left: 0; }
   .focused-main .page { padding: 24px 16px 38px; }
 }
+/* Evaluation and persistent verification history */
+.evaluation-page .panel, .verification-history { padding: 24px; }
+.evaluation-page h2, .verification-history h2 { margin: 0 0 12px; }
+.evaluation-page p, .verification-history p { color: #64748b; line-height: 1.6; margin: 12px 0; }
+.evaluation-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 20px 0; }
+.evaluation-controls label { display: flex; flex-direction: column; gap: 8px; font-size: 13px; font-weight: 600; }
+.evaluation-controls input, .evaluation-controls select, .verification-history select { min-width: 0; max-width: 100%; padding: 9px; border: 1px solid #dce3ec; border-radius: 7px; background: white; }
+.evaluation-page .section-actions { flex-wrap: wrap; }
+.evaluation-page .section-actions label { font-size: 13px; }
+.evaluation-page .button input[type=file] { max-width: 210px; }
+.evaluation-page td { min-width: 110px; max-width: 260px; overflow-wrap: anywhere; white-space: normal; vertical-align: top; }
+.verification-history td { overflow-wrap: anywhere; max-width: 320px; }
+.scenario-grid { display: flex; gap: 10px; flex-wrap: wrap; }
+.history-warning { color: #b45309 !important; }
+.local-evaluation { max-width: 1500px; margin: auto; padding: 24px; }
+.sample-dataset video { display: block; width: min(100%, 480px); max-height: 300px; margin-top: 16px; background: #111827; border-radius: 8px; }
+.sample-dataset select { max-width: 100%; padding: 9px; border: 1px solid #dce3ec; border-radius: 7px; }
+@media(max-width: 760px) { .evaluation-controls { grid-template-columns: 1fr; } .evaluation-page .panel, .verification-history { padding: 16px; } }

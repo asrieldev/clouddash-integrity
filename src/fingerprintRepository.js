@@ -26,6 +26,7 @@ export function toFingerprintRow(fingerprint) {
     signature: fingerprint.signature,
     signature_algorithm: fingerprint.signatureAlgorithm ?? fingerprint.signature_algorithm ?? 'ECDSA_P256_SHA256',
     source: fingerprint.source || 'recorded-video-segment'
+    ,...(Number(fingerprint.version) >= 3 ? { perceptual: fingerprint.perceptual, perceptual_hash: fingerprint.perceptualHash ?? fingerprint.perceptual_hash } : {})
   };
 }
 
@@ -40,13 +41,19 @@ function safeRepositoryError(error, conflictMessage = 'A different fingerprint a
 }
 
 export async function listFingerprints(workspaceId) {
+  const rows = [];
+  for (let from = 0; ; from += 500) {
   const { data, error } = await requireSupabase()
     .from('fingerprints')
-    .select('id, version, workspace_id, device_id, session_id, segment_id, sequence, bytes, sha256, captured_at, received_at, created_at, previous_hash, chain_hash, signature, signature_algorithm, source, devices(label, public_key)')
+    .select('id, version, workspace_id, device_id, session_id, segment_id, sequence, bytes, sha256, captured_at, received_at, created_at, previous_hash, chain_hash, signature, signature_algorithm, source, perceptual, perceptual_hash, devices(label, public_key)')
     .eq('workspace_id', workspaceId)
-    .order('captured_at', { ascending: true });
+    .order('captured_at', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, from + 499);
   if (error) throw error;
-  return data;
+  rows.push(...data);
+  if (data.length < 500) return rows;
+  }
 }
 
 export async function storeFingerprint(fingerprint) {
