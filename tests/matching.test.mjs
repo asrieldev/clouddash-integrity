@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fingerprintFrame, distance, METHODS, thresholdSweep } from '../src/matching/metrics.js';
 import { matchVideo } from '../src/matching/alignment.js';
 import { evaluateRecovery } from '../src/matching/networkEvaluation.js';
-import { verificationSummary } from '../src/verificationHistory.js';
+import { describeVerification, verificationSummary } from '../src/verificationHistory.js';
 import { createEvidenceSegment, stableJson, sha256 } from '../src/security/chain.js';
 import { generateDeviceKeyPair, exportPublicKey, signFingerprint } from '../src/security/deviceKeys.js';
 import { verifyTrustedFingerprint } from '../src/security/verification.js';
@@ -72,6 +72,19 @@ test('all recovery fault scenarios retain and eventually deliver every fingerpri
 test('reliability includes mismatches and not-found but separates errors and non-video checks', () => {
   const s = verificationSummary([{kind:'video',status:'VERIFIED'},{kind:'video',status:'FILE_HASH_MISMATCH'},{kind:'video',status:'FINGERPRINT_NOT_FOUND'},{kind:'video',status:'ERROR'},{kind:'manifest',status:'VERIFIED'},{kind:'evaluation',status:'CONTENT_MATCH'}]);
   assert.equal(s.checked,3); assert.equal(s.failures,2); assert.equal(s.errors,1); assert.equal(s.reliability,100/3); assert.equal(verificationSummary([]).reliability,null);
+});
+
+test('verification history explains old failures and new evaluation problems', () => {
+  const mismatch = describeVerification({ status: 'FILE_HASH_MISMATCH', details: { observedHash: 'a'.repeat(64) } });
+  assert.equal(mismatch.title, 'File changed');
+  assert.match(mismatch.problem, /differ/);
+  assert.match(mismatch.evidence[0], /Observed SHA-256/);
+  const evaluation = describeVerification({ status: 'EVALUATED', details: { cases: 20, failures: 3, issueCounts: { FALSE_MATCH: 1, MISSED_MATCH: 2 }, affectedFiles: ['crop.mp4'] } });
+  assert.equal(evaluation.isPass, false);
+  assert.match(evaluation.problem, /3 problem decisions/);
+  assert.match(evaluation.problem, /false match/);
+  assert.match(evaluation.evidence.at(-1), /crop.mp4/);
+  assert.equal(describeVerification({ status: 'VERIFIED', details: {} }).isPass, true);
 });
 test('signed v3 fingerprints bind canonical perceptual content and reject tampering', async () => {
   const keys = await generateDeviceKeyPair();

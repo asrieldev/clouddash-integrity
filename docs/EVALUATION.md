@@ -2,18 +2,20 @@
 
 ## Why failures were absent
 
-The old Decoder kept its results only in React state. The integrity page independently audited cloud chains; it never received submitted-file failures. The new shared history saves all statuses, including `FILE_HASH_MISMATCH`, `FINGERPRINT_NOT_FOUND`, signature/chain failures and `ERROR`. Browser storage preserves attempts during server outages and retries on reconnect or refresh. An unavailable history table is reported explicitly.
+The old Decoder kept its results only in React state. The integrity page independently audited cloud chains; it never received submitted-file failures. The shared history now saves exact-video, manifest, protected-incident, evaluation-batch, and network-recovery results, including `FILE_HASH_MISMATCH`, `FINGERPRINT_NOT_FOUND`, signature/chain failures, false or missed matches, recovery failures, and `ERROR`. Browser storage preserves attempts during server outages and retries on reconnect or refresh. An unavailable history table is reported explicitly.
+
+Historical rows are not rewritten. The UI interprets both older sparse records and current richer records through the same status guide. The main message states the problem in plain language, while expandable technical details retain available hashes, references, session/segment identities, match totals, and affected evaluation files. Evaluation history stores one bounded batch summary rather than one row for every metric/threshold decision.
 
 Reliability is an operational pass rate over actual exact-video verification attempts. It is undefined before any completed checks. Repeated checks count as repeated attempts. Manifest and evaluation records are logged separately. Errors do not assert that evidence was altered and are displayed separately from failed checks. The audit table is append-only to authenticated clients under workspace RLS; client-reported results are not a tamper-proof, independently computed server verdict.
 
 ## Using the lab
 
-1. Load the generated dataset, upload original reference videos, or load valid signed cloud profiles. Original uploaded references are local benchmark material, not trusted capture attestations.
+1. For the quickest demonstration, select **Load demo dataset**. Otherwise upload original reference videos or load valid signed cloud profiles. Original uploaded references are local benchmark material, not trusted capture attestations.
 2. Select test videos and their scenario. For mixed batches, select the generated `manifest.json` so each file has its own ground truth. The `reference` field identifies the expected original filename/segment.
 3. Choose a hash and distance, or compare all methods. Enable threshold sweep to evaluate five candidate distances.
-4. Run evaluation. Each row reports correspondence, reference trip/segment, reference start/end, temporal offset, speed estimate, match score, matched samples/percentage, anomalies, extraction and matching time, and classification.
-5. Export JSON for all alignment pairs and anomalies. The CLI additionally produces CSV. Save/export before leaving the lab; its per-case reports are held in page memory. Cloud history records the batch summary.
-6. Run network failure scenarios for transport recovery metrics. Tests are clearly identified as fault injection, not a real server shutdown.
+4. Run evaluation. The first result cards show videos tested, false matches, missed matches, and decode errors. The problem banner states whether attention is required. Expand detailed measurements for correspondence, reference trip/segment, reference start/end, temporal offset, speed estimate, match score, matched samples/percentage, anomalies, extraction and matching time, and classification.
+5. Export JSON for all alignment pairs and anomalies. The CLI additionally produces CSV. Save/export before leaving the lab; its per-case reports are held in page memory. Authenticated runs save a batch summary with problem counts and affected filenames to cloud history.
+6. Run network failure scenarios for transport recovery metrics. Authenticated results are also added to history. Tests are clearly identified as fault injection, not a real server shutdown.
 
 ## Covered cases and expected semantics
 
@@ -73,7 +75,7 @@ See [RESULTS.md](evaluation/RESULTS.md) for measured results, including the fail
 
 ## Website metric evaluation (October 2026)
 
-Open **Evaluation lab** (or `/evaluation-local` without signing in). Add original videos and transformed test videos, select their ground-truth scenario, then click **Evaluate videos**. Alternatively load the 23 synthetic scenarios with their supplied labels. All four perceptual hashes, both Hamming variants, the three vector distances, and threshold sweeps are enabled by default. Fuzzy scores are calculated for source-file bytes where available.
+Open **Video evaluation** (or `/evaluation-local` without signing in). Select **Load demo dataset** for all 23 synthetic scenarios, or add original videos and transformed test videos, select their ground-truth scenario, then run the evaluation. All four perceptual hashes, both Hamming variants, the three vector distances, and threshold sweeps are enabled by default. Fuzzy scores are calculated for source-file bytes where available.
 
 Results include mean accepted-frame distance, expandable individual frame distances, cosine similarity, confusion counts, precision, recall, F1, and provisional threshold suggestions. The mean excludes rejected and unaligned frames; use coverage and missed-match counts alongside it. Suggestions maximize F1 over tested thresholds, then prefer fewer false matches and a stricter threshold. Both matching and non-matching examples are required. These are dataset-specific calibration suggestions, not independently validated thresholds. Export report includes recommendations and frame pairs. Clear results before starting an unrelated dataset.
 

@@ -4,9 +4,11 @@ CloudDash is a hybrid dashcam integrity prototype for insurance evidence. Supaba
 
 ## Verification history and video evaluation
 
-The Decoder now records successful checks, mismatches, missing references and processing errors in **Integrity & history**, also visible on the monitor and Decoder. Attempts are written to a per-user browser outbox before cloud sync. The displayed **reliability** is the exact-video pass rate: `VERIFIED / completed video checks`. Missing references and mismatches lower this rate; processing errors are counted separately. It is not a probability of authenticity, and manifest/perceptual checks do not increase it. These are client-reported audit attempts, not server-attested verdicts.
+The Decoder records every exact-video, manifest, protected-incident, evaluation-batch, and network-recovery check in **Integrity & history**, also visible on the monitor and Decoder. Existing records are interpreted with the same clear result labels as new records. Each row explains what failed—such as changed bytes, a missing cloud reference, invalid signature, broken chain, false match, missed match, or decode error—and keeps hashes, session IDs, segment IDs, affected files, and match totals under expandable technical details. Attempts are written to a per-user browser outbox before cloud sync, so failed checks are not lost during an outage.
 
-Open **Evaluation lab** for temporal alignment, perceptual/fuzzy metrics, threshold sweeps, anomaly positions and JSON reports. **Generated test videos** includes playable/downloadable examples and a **Load all 23 test scenarios** button. The bundled videos are synthetic FFmpeg patterns, clearly labelled; they are not real dashcam footage. The lab is also available without an account at `/evaluation-local` for local-only benchmarking; cloud references and cloud history remain authenticated.
+The displayed **reliability** remains the exact-video pass rate: `VERIFIED / completed video checks`. Missing references and mismatches lower this rate; processing errors are counted separately. Manifest, evaluation, and network records remain visible but do not inflate the exact-video score. These are client-reported audit attempts, not server-attested verdicts.
+
+Open **Video evaluation** and select **Load demo dataset** for the shortest path through all 23 labelled scenarios, or use the three-step original/test/run workflow for your own videos. The first results view emphasizes tested videos, false matches, missed matches, decode errors, and whether problems were found; metric tables and threshold calibration stay collapsed until needed. The bundled videos are synthetic FFmpeg patterns, clearly labelled; they are not real dashcam footage. The lab is also available without an account at `/evaluation-local` for local-only benchmarking; cloud references and cloud history remain authenticated.
 
 New recordings use signed version-3 fingerprints that bind frame profiles to the exact SHA-256 evidence chain. Older recordings remain verifiable by SHA-256, but cannot acquire perceptual fingerprints without their original video. A `CONTENT_MATCH` can identify a transformed clip while its exact-byte integrity remains unverified. Never equate visual similarity with `VERIFIED`.
 
@@ -198,6 +200,8 @@ The `evidence` bucket must remain private. RLS authorizes drivers for their own 
 npm test
 npm run build
 ```
+
+The automated suite covers SHA-256 and ECDSA tamper detection, session-scoped chain failures, manifest validation, local retention, offline queue recovery, persistent IndexedDB delivery, perceptual alignment, fuzzy hashing in a strict browser bundle, evaluation thresholds, downloaded-video metric checks, and human-readable history explanations. CI runs `npm ci`, the complete Node test suite, and a production Vite build for every push and pull request.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/SUPABASE.md](docs/SUPABASE.md), [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), and [docs/VIDEO_SCRIPTS.md](docs/VIDEO_SCRIPTS.md).
 

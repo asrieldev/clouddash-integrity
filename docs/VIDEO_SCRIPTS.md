@@ -146,6 +146,16 @@ Target duration: five to seven minutes.
 
 > CloudDash combines exact-byte SHA-256, device signatures, session-scoped hash chains, immutable identifiers, append-only cloud references, RLS, and private incident storage. These controls detect modified, replaced, relabeled, missing, reordered, and inconsistently stored evidence while keeping normal driving video on the driver's device.
 
+### 10. Show persistent verification history and evaluation
+
+**Show:** Integrity & history, expand a failed row's technical details, then open Video evaluation and select Load demo dataset.
+
+**Say:**
+
+> Every current and previous verification attempt remains visible. The result column uses plain-language labels, and What happened explains the actual problem, such as changed bytes, a missing reference, invalid signature, broken chain, false match, missed match, or processing error. Technical hashes and session identifiers remain available without crowding the main table.
+
+> The evaluation interface has a one-click demo path and a three-step custom workflow. The first results show videos tested, false matches, missed matches, and decode errors. Advanced metrics, thresholds, frame distances, fuzzy hashes, and network recovery evidence remain available in expandable sections. Authenticated evaluation and recovery summaries are also saved in verification history.
+
 ## Recording checklist
 
 - Record Video 1 and Video 2 as separate files.
@@ -155,4 +165,6 @@ Target duration: five to seven minutes.
 - Prepare the edited video and changed manifest before recording Video 2.
 - Keep the original and edited filenames visibly distinct.
 - Show the exact failure status, not only a red badge.
+- Expand one verification-history row so the problem and technical evidence are both visible.
+- Run the demo evaluation and point out the problem summary before opening advanced measurements.
 - End each recording with the relevant requirement summary.
