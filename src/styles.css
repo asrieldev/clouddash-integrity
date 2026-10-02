@@ -1922,3 +1922,27 @@ body, .focused-shell { background: #111214; }
 .history-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; font-size: 12px; color: #a5b0be; }
 .history-pagination > span { margin-right: auto; }
 @media (max-width: 650px) { .verification-history table { min-width: 580px; } .decoder-page .decoder-intake { padding: 16px; } .history-pagination { flex-wrap: wrap; } }
+
+.evaluation-setup { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.evaluation-page { display: grid; gap: 18px; }
+.evaluation-page .panel { min-width: 0; margin: 0; }
+.evaluation-page p { font-size: 13px; color: #a5b0be; }
+.evaluation-page summary { cursor: pointer; color: #d3dfec; font-weight: 600; font-size: 13px; padding: 6px 0; }
+.evaluation-page details[open] > summary { margin-bottom: 16px; }
+.evaluation-page .step-label { display: block; color: #82c9ef; font-size: 10px; font-weight: 700; letter-spacing: .12em; margin-bottom: 10px; }
+.evaluation-page input, .evaluation-page select { background: #22262d; color: #e2e8f0; border: 1px solid #454c58; border-radius: 8px; padding: 9px; font: inherit; font-size: 12px; max-width: 100%; min-width: 0; }
+.evaluation-page input[type=checkbox] { accent-color: #3183c4; }
+.evaluation-page input[type=file] { display: block; width: 100%; margin-top: 8px; }
+.evaluation-page .button:has(input[type=file]) { display: block; }
+.evaluation-page .evaluation-controls { grid-template-columns: 1fr; }
+.evaluation-file-list { max-height: 110px; overflow: auto; padding-left: 18px; font-size: 12px; color: #9caabd; overflow-wrap: anywhere; }
+.evaluation-run { display: grid; grid-template-columns: 1fr auto; gap: 8px 20px; align-items: center; }
+.evaluation-run > p, .evaluation-advanced { grid-column: 1 / -1; }
+.evaluation-advanced { border-top: 1px solid #303238; padding-top: 12px; }
+.evaluation-summary { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; margin: 20px 0; }
+.evaluation-summary > div { border: 1px solid #303b47; border-radius: 10px; padding: 16px; display: grid; gap: 5px; }
+.evaluation-summary strong { font-size: 25px; color: #e2edf8; }
+.evaluation-summary span { font-size: 12px; color: #a5b0be; }
+.evaluation-page .table-wrap { max-height: 480px; overflow: auto; }
+.evaluation-page td { overflow-wrap: anywhere; }
+@media(max-width: 760px) { .evaluation-setup { grid-template-columns: 1fr; } .evaluation-summary { grid-template-columns: 1fr 1fr; } .evaluation-run { grid-template-columns: 1fr; } .evaluation-run .button { justify-self: start; } }
