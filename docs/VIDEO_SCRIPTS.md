@@ -156,6 +156,8 @@ Target duration: five to seven minutes.
 
 > The evaluation interface has a one-click demo path and a three-step custom workflow. The first results show videos tested, false matches, missed matches, and decode errors. Advanced metrics, thresholds, frame distances, fuzzy hashes, and network recovery evidence remain available in expandable sections. Authenticated evaluation and recovery summaries are also saved in verification history.
 
+> When only part of a video differs, the section-review timeline separates ranges that appear consistent from ranges needing attention and ranges without enough visual detail. Selecting a range jumps to that timestamp in the uploaded video. This helps a claims handler find the relevant footage quickly, while clearly avoiding a claim that the software knows the exact editing technique.
+
 ## Recording checklist
 
 - Record Video 1 and Video 2 as separate files.

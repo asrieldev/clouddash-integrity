@@ -10,6 +10,7 @@ import { verifyTrustedFingerprint } from '../src/security/verification.js';
 import { fuzzyFingerprint, compareFuzzy } from '../src/matching/fuzzy.js';
 import { ssdeepScore } from '../src/matching/ssdeepScore.js';
 import { parseEvidenceManifest } from '../src/security/fingerprintFile.js';
+import { modificationFindings } from '../src/matching/modificationFindings.js';
 
 function frame(seed) {
   let state = seed;
@@ -51,12 +52,20 @@ test('reports speed, replaced sections and reordered content; rejects another tr
   const speed = matchVideo(faster,profile(frames)); assert.ok(speed.speedRatio>1.1);
   const modified = matchVideo(profile(frames.map((f,i) => i>=12 && i<17 ? { ...f,...frame(i+98765) } : f)),profile(frames));
   assert.ok(modified.anomalies.some(x=>x.type==='UNMATCHED_SECTION'));
+  assert.ok(modified.sections.some(x => x.state === 'review' && x.start <= 6 && x.end >= 8.5));
+  assert.ok(modified.sections.some(x => x.state === 'consistent'));
   assert.ok(matchVideo(profile(frames.toReversed()),profile(frames)).anomalies.some(x=>x.type==='POSSIBLE_REORDER'));
   assert.equal(matchVideo(profile(Array.from({length:30},(_,i)=>frame(i+80000))),profile(frames)).match,false);
 });
 test('flat frames cannot create an accepted match', () => {
   const flat = profile(Array.from({length:10},()=>fingerprintFrame(Array(1024).fill(128))));
-  assert.equal(matchVideo(flat,flat).match,false);
+  const result = matchVideo(flat,flat); assert.equal(result.match,false); assert.deepEqual(result.sections.map(section => section.state), ['inconclusive']);
+});
+test('modification indicators use insurance-friendly cautious labels', () => {
+  const findings = modificationFindings([{ type: 'UNMATCHED_SECTION', start: 6, end: 8.5 }, { type: 'POSSIBLE_REORDER', start: 10 }]);
+  assert.equal(findings[0].label, 'Changed or replaced section');
+  assert.match(findings[0].explanation, /may be an edit/);
+  assert.equal(findings[1].label, 'Possible reordered footage');
 });
 test('threshold counts distinguish false and missed matches', () => {
   const rows = thresholdSweep([{ distance:.1,expected:true },{ distance:.3,expected:true },{ distance:.2,expected:false }],[.15,.25]);

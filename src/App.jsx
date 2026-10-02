@@ -2134,7 +2134,7 @@ function Decoder({ notify }) {
       const trust = hashCheck.valid ? referenceTrust : hashCheck;
       const metrics = await verifyVideoMetrics(file, reference, referenceTrust?.valid);
       const status = hashCheck.valid ? trust.status : hashCheck.status;
-      setVideoResult({ name: file.name, observedHash, status, reference, metrics, signatureValid: trust.signatureValid, chain: trust.chain, reason: trust.reason });
+      setVideoResult({ name: file.name, blob: file, observedHash, status, reference, metrics, signatureValid: trust.signatureValid, chain: trust.chain, reason: trust.reason });
       notify(status === 'VERIFIED' ? 'Video verified against its signed cloud fingerprint and hash chain.' : `${status}: ${trust.reason || 'Evidence verification failed.'}`);
     } catch (error) { setVideoResult({ status: 'ERROR', name: file.name, reason: error.message }); notify(`Video verification failed: ${error.message}`); }
     finally { setChecking(false); if (videoInputRef.current) videoInputRef.current.value = ''; }

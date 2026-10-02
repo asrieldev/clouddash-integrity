@@ -1,5 +1,19 @@
 import { distance, DEFAULT_THRESHOLDS } from './metrics.js';
 
+function buildTimelineSections(frames, pairs, duration, interval) {
+  const matched = new Set(pairs.map(pair => pair.queryIndex));
+  const sections = [];
+  for (let index = 0; index < frames.length; index++) {
+    const start = frames[index].time;
+    const end = Math.min(duration, frames[index + 1]?.time ?? start + interval);
+    const state = matched.has(index) ? 'consistent' : frames[index].information >= 3 ? 'review' : 'inconclusive';
+    const previous = sections.at(-1);
+    if (previous?.state === state && Math.abs(previous.end - start) < 0.01) previous.end = end;
+    else sections.push({ state, start, end });
+  }
+  return sections.filter(section => section.end > section.start);
+}
+
 // Local sequence alignment: gaps absorb deleted/duplicated samples without requiring equal FPS.
 export function matchVideo(query, reference, { method = 'pHash', metric = 'normalizedHamming', threshold = DEFAULT_THRESHOLDS[metric], minimumCoverage = 0.7 } = {}) {
   const started = performance.now(), q = query.frames, r = reference.frames;
@@ -62,7 +76,8 @@ export function matchVideo(query, reference, { method = 'pHash', metric = 'norma
   const meanDistance = pairs.length ? pairs.reduce((sum, p) => sum + p.distance, 0) / pairs.length : null;
   const fullScale = { hamming: 64, normalizedHamming: 1, l1: 128, l2: 16, cosine: 2 }[metric];
   const match = pairs.length >= 3 && coverage >= minimumCoverage;
-  return { match, status: match ? 'CONTENT_MATCH' : pairs.length >= 3 ? 'PARTIAL_MATCH' : 'NO_MATCH', matchedFingerprints: pairs.length, totalFingerprints: q.length, matchedPercentage: coverage * 100, score: meanDistance === null ? 0 : 100 * coverage * Math.max(0, 1 - meanDistance / fullScale), meanDistance, referenceStart: first?.referenceTime ?? null, referenceEnd: last ? Math.min(reference.duration, last.referenceTime + reference.interval) : null, queryStart: first?.queryTime ?? null, offsetSeconds: first ? first.referenceTime - (speed ?? 1) * first.queryTime : null, speedRatio: speed, anomalies, pairs, method, metric, threshold, minimumCoverage, processingMs: performance.now() - started };
+  const sections = buildTimelineSections(q, pairs, query.duration, query.interval);
+  return { match, status: match ? 'CONTENT_MATCH' : pairs.length >= 3 ? 'PARTIAL_MATCH' : 'NO_MATCH', matchedFingerprints: pairs.length, totalFingerprints: q.length, matchedPercentage: coverage * 100, score: meanDistance === null ? 0 : 100 * coverage * Math.max(0, 1 - meanDistance / fullScale), meanDistance, referenceStart: first?.referenceTime ?? null, referenceEnd: last ? Math.min(reference.duration, last.referenceTime + reference.interval) : null, queryStart: first?.queryTime ?? null, queryDuration: query.duration, offsetSeconds: first ? first.referenceTime - (speed ?? 1) * first.queryTime : null, speedRatio: speed, anomalies, sections, pairs, method, metric, threshold, minimumCoverage, processingMs: performance.now() - started };
 }
 
 export function classifyResult(result, expected, modified = false) {
