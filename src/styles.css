@@ -1893,3 +1893,32 @@ body, .focused-shell { background: #111214; }
 .sample-dataset video { display: block; width: min(100%, 480px); max-height: 300px; margin-top: 16px; background: #111827; border-radius: 8px; }
 .sample-dataset select { max-width: 100%; padding: 9px; border: 1px solid #dce3ec; border-radius: 7px; }
 @media(max-width: 760px) { .evaluation-controls { grid-template-columns: 1fr; } .evaluation-page .panel, .verification-history { padding: 16px; } }
+
+/* Keep verification focused on the uploaded evidence. */
+.decoder-page .decoder-layout { display: block; }
+.decoder-page .decoder-intake { padding: 24px; gap: 20px; }
+.decoder-verifier { display: grid; gap: 12px; }
+.decoder-verifier > .button { justify-self: start; }
+.decoder-page .metrics { gap: 12px; }
+.decoder-page details summary, .history-explanation summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #c4d3e2; padding: 8px 0; }
+.decoder-page .reference-options, .decoder-page .manifest-options { border-top: 1px solid #303238; padding-top: 8px; }
+.decoder-page .reference-options label { display: grid; gap: 8px; margin: 12px 0; font-size: 12px; }
+.decoder-page select, .verification-history select { width: auto; max-width: 100%; color: #e2e8f0; background: #22262d; border: 1px solid #454c58; border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 12px; }
+.decoder-page .manifest-options > .button { margin: 12px 0; }
+.decoder-page .decoder-references { padding: 12px 24px; }
+.decoder-page .decoder-references .fingerprint-list { max-height: 330px; overflow: auto; }
+.decoder-page .decoder-result span { text-transform: none; letter-spacing: normal; overflow-wrap: anywhere; }
+.verification-history .panel-title { margin-bottom: 8px; }
+.verification-history h2 { margin-bottom: 6px; }
+.verification-history p { font-size: 12px; color: #a5b0be; margin: 6px 0; }
+.verification-history .section-actions { margin: 12px 0; }
+.verification-history .section-actions label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.verification-history table { table-layout: fixed; width: 100%; }
+.verification-history th:first-child { width: 38%; }
+.verification-history th:nth-child(2) { width: 12%; }
+.verification-history th:nth-child(3) { width: 23%; }
+.verification-history td { font-size: 12px; white-space: normal; overflow-wrap: anywhere; }
+.verification-history td small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.history-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 14px; font-size: 12px; color: #a5b0be; }
+.history-pagination > span { margin-right: auto; }
+@media (max-width: 650px) { .verification-history table { min-width: 580px; } .decoder-page .decoder-intake { padding: 16px; } .history-pagination { flex-wrap: wrap; } }

@@ -2175,10 +2175,10 @@ function Decoder({ notify }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   return (
-    <div className="page">
+    <div className="page decoder-page">
       <SectionHead
-        title="Decoder - insurer verification"
-        copy="Verify local video bytes or a signed JSON evidence manifest against the append-only cloud reference. Legacy TXT hashes remain review-only."
+        title="Verify evidence"
+        copy="Open a recorder download to check its integrity and compare its fingerprints."
         action={<div className="section-actions"><button className="button secondary" onClick={reload}><Radio size={16} /> Refresh stream</button><button className="button secondary" disabled={!modernFingerprints.length} onClick={downloadCloudFingerprints}><Download size={16} /> Download manifests</button></div>}
       />
       <section className="metrics">
@@ -2186,29 +2186,33 @@ function Decoder({ notify }) {
         <Metric label="Stream state" value={realtimeState === 'SUBSCRIBED' ? 'Live' : 'Offline'} change={`Supabase Realtime ${realtimeState.toLowerCase()}`} icon={Activity} />
         <Metric label="Last verification" value={videoResult?.status || result?.status || '--'} change={videoResult?.name || (result ? `${result.matched}/${result.total} hashes found` : 'No file checked')} icon={ShieldCheck} tone={(videoResult?.status || result?.status) === 'VERIFIED' ? 'green' : 'amber'} />
       </section>
-      <VerificationHistory />
       <section className="decoder-layout">
         <article className="panel decoder-intake">
+          <div className="decoder-verifier">
+            <span>Video verification</span><h2>Verify a downloaded video</h2><p>Select a video downloaded from the recorder, including an edited copy. CloudDash checks exact integrity and all fingerprint metrics against the recorded reference in this browser; the video is never uploaded.</p>
+            <details className="reference-options"><summary>Comparing an edited or renamed copy?</summary><p>Choose the original recording only when automatic matching cannot identify your file. Unchanged recorder downloads are matched automatically.</p><label>Compare against recording<select aria-label="Original recorded segment" disabled={checking || !!selectedManifest} value={metricReferenceId} onChange={event => setMetricReferenceId(event.target.value)}><option value="">Automatic: filename, SHA-256 or selected manifest</option>{modernFingerprints.map(record => <option key={record.segment_id} value={record.segment_id}>{record.session_id.slice(0,8)} · #{record.sequence} · {new Date(record.captured_at).toLocaleString()}</option>)}</select></label>{selectedManifest && <p>The loaded manifest selects the reference. Clear it to choose another recording.</p>}<button className="button secondary" disabled={checking} onClick={() => { setSelectedManifest(null); setMetricReferenceId(''); }}>Use automatic matching</button></details>
+            <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
+            <button className="button primary" disabled={checking} onClick={() => videoInputRef.current?.click()}><FileVideo size={16} /> {checking ? 'Checking...' : 'Open video file'}</button>
+            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'VERIFIED' : videoResult.status === 'LEGACY_EVIDENCE' ? 'REVIEW' : 'FAILED'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
+          </div>
+          <details className="manifest-options"><summary>Verify an evidence manifest instead</summary>
           <FileCheck2 size={25} />
           <div><span>Evidence manifest</span><h2>Verify a signed manifest</h2><p>Open a version-2 JSON manifest to resolve one exact session segment. Legacy raw-hash TXT files remain supported but do not prove session identity.</p></div>
           <input ref={inputRef} type="file" accept=".json,.txt,application/json,text/plain" hidden onChange={(event) => verifyFile(event.target.files?.[0])} />
-          <button className="button primary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open evidence manifest'}</button>
+          <button className="button secondary" disabled={checking} onClick={() => inputRef.current?.click()}><HardDriveUpload size={16} /> {checking ? 'Checking...' : 'Open evidence manifest'}</button>
           {selectedManifest && <p className="muted">Expected segment {selectedManifest.segmentId.slice(0, 8)} · session {selectedManifest.sessionId.slice(0, 8)} · sequence #{selectedManifest.sequence}</p>}
           {result && <div className={result.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{result.status}</b><span>{result.matched} of {result.total} supplied records passed trusted fingerprint, signature, and chain checks.</span>{result.missing.length > 0 && <code>{result.missing[0]}</code>}</div>}
-          <div className="decoder-verifier">
-            <span>Incident video</span><h2>Verify a downloaded video</h2><p>Select a video downloaded from the recorder, including an edited copy. CloudDash checks exact integrity and all fingerprint metrics against the recorded reference in this browser; the video is never uploaded.</p>
-            <label>Original recorded segment<select aria-label="Original recorded segment" disabled={checking || !!selectedManifest} value={metricReferenceId} onChange={event => setMetricReferenceId(event.target.value)}><option value="">Automatic: filename, SHA-256 or selected manifest</option>{modernFingerprints.map(record => <option key={record.segment_id} value={record.segment_id}>{record.session_id.slice(0,8)} · #{record.sequence} · {new Date(record.captured_at).toLocaleString()}</option>)}</select></label>
-            <input ref={videoInputRef} type="file" accept="video/*" hidden onChange={(event) => verifyVideo(event.target.files?.[0])} />
-            <button className="button secondary" disabled={checking} onClick={() => videoInputRef.current?.click()}><FileVideo size={16} /> {checking ? 'Checking...' : 'Open video file'}</button>
-            {videoResult && <div className={videoResult.status === 'VERIFIED' ? 'decoder-result' : 'decoder-result mismatch'}><b>{videoResult.status === 'VERIFIED' ? 'VERIFIED' : videoResult.status === 'LEGACY_EVIDENCE' ? 'REVIEW' : 'FAILED'}</b><span>{videoResult.status} · {videoResult.name}</span><code>{videoResult.observedHash}</code>{videoResult.reference && <><span>Device {videoResult.reference.device_id} · sequence #{videoResult.reference.sequence}</span><span>Captured {new Date(videoResult.reference.captured_at).toLocaleString()} · received {new Date(videoResult.reference.received_at || videoResult.reference.created_at).toLocaleString()}</span><span>Signature {videoResult.signatureValid ? 'valid' : 'not valid'} · chain {videoResult.chain?.valid ? 'valid' : 'not valid'}</span></>}{videoResult.reason && <span>{videoResult.reason}</span>}</div>}
-          </div>
+
+          </details>
         </article>
-        <article className="panel fingerprint-stream">
-          <div className="panel-title"><div><h2>Cloud reference stream</h2><p>Persisted in Supabase with a capture timestamp and source.</p></div><Badge tone="success">Realtime</Badge></div>
-          {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>{record.session_id ? `${record.session_id.slice(0, 6)} · #${record.sequence}` : `legacy · #${record.sequence}`}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone={Number(record.version ?? 1) >= 2 ? 'info' : 'warning'}>{Number(record.version ?? 1) >= 2 ? 'session v2' : 'legacy'}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip from the Encoder." />}
-        </article>
+
       </section>
       <VideoMetricResults result={videoResult} />
+      <VerificationHistory compact />
+        <details className="panel fingerprint-stream decoder-references"><summary>Browse cloud reference fingerprints</summary>
+          <div className="panel-title"><div><h2>Cloud reference stream</h2><p>Persisted in Supabase with a capture timestamp and source.</p></div><Badge tone="success">Realtime</Badge></div>
+          {fingerprints.length ? <div className="fingerprint-list">{fingerprints.slice().reverse().slice(0, 15).map((record) => <div key={record.id}><span>{record.session_id ? `${record.session_id.slice(0, 6)} · #${record.sequence}` : `legacy · #${record.sequence}`}</span><b>{new Date(record.captured_at).toLocaleTimeString()}</b><code>{record.sha256}</code><Badge tone={Number(record.version ?? 1) >= 2 ? 'info' : 'warning'}>{Number(record.version ?? 1) >= 2 ? `Session v${record.version}` : 'legacy'}</Badge></div>)}</div> : <Empty text="No cloud fingerprints yet. Capture a clip from the Encoder." />}
+        </details>
       <section className="panel segment-table">
         <div className="panel-title"><div><h2>Protected incident videos</h2><p>Only driver-locked evidence is copied to private Supabase Storage.</p></div><Badge tone="neutral">Private</Badge></div>
         {incidentGroups.length ? <div className="table-wrap incident-evidence-table"><table><thead><tr><th>Evidence</th><th>Device / sequence</th><th>Custody timestamps</th><th>Size</th><th>Hash comparison</th><th>Cryptographic checks</th><th>Result</th><th>Actions</th></tr></thead><tbody>{incidentGroups.map(group => {
