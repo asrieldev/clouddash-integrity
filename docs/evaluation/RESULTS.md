@@ -48,6 +48,22 @@ Max F1; ties use the smallest distance threshold. These are exploratory fits to 
 | pHash/l2/3.75 | 22 | 0 | 1 | 0 | 1.000 |
 | pHash/cosine/0.1 | 22 | 0 | 1 | 0 | 1.000 |
 
+### Interpretation of perceptual and vector distances
+
+Raw Hamming and normalized Hamming produce exactly the same ordering and match decisions: normalized Hamming is simply the raw count divided by 64. Normalization therefore improves comparability with hashes of other lengths, but it does not add discrimination for these fixed 64-bit hashes.
+
+| Fingerprint / distance | Synthetic result | Reliability conclusion |
+|---|---|---|
+| aHash / Hamming | F1 1.000 at 15 bits (0.234375 normalized) | Useful on this dataset, but not established as reliable: aHash retains only coarse brightness structure and the benchmark contains one negative trip. |
+| dHash / Hamming | F1 1.000 at 6 bits (0.09375 normalized) | Best strict Hamming threshold in this run, but still provisional because gradients can collide on visually similar roads and repeated scenes. |
+| pHash / Hamming | F1 0.952 at 18 bits (0.28125 normalized), with two missed matches | Not reliable as a stand-alone matcher for all tested transformations; temporal alignment and coverage caused failures even after loosening the bit threshold. |
+| wHash / Hamming | F1 1.000 at 15 bits (0.234375 normalized) | Not independent confirmation: this implementation's low-frequency Haar approximation is equivalent to the block averages used by aHash. |
+| Standardized luminance vector / L1 | F1 1.000 at distance 24 | Promising calibration candidate for this synthetic set, not a universal threshold. |
+| Standardized luminance vector / L2 | F1 1.000 at distance 3.75 | Promising calibration candidate for this synthetic set, not a universal threshold. |
+| Standardized luminance vector / cosine distance | F1 1.000 at distance 0.1 | Promising here and scale-insensitive, but can accept reordered scenes with similar coarse appearance. |
+
+These F1 values are video-level decisions after sequence alignment, minimum-frame, and coverage rules; they are not evidence that every individual frame pair is correctly classified. The appropriate production threshold remains undetermined until the same selection procedure is fitted on calibration trips and evaluated once on held-out, visually similar trips.
+
 ## Fuzzy byte-stream results
 
 | Scenario | ssdeep similarity | TLSH distance |
@@ -77,6 +93,16 @@ Max F1; ties use the smallest distance threshold. These are exploratory fits to 
 | partial | 0 | 217 |
 
 The authentic file matches exactly; every re-encoded variant has ssdeep similarity 0. TLSH distances overlap between unrelated and transformed videos. Neither is a suitable stand-alone visual matcher. JavaScript ports were used (ssdeep.js digest with ssdeep comparison rules; tlsh 1.0.8 legacy format), not a claim of exhaustive compatibility with current native releases.
+
+### Fuzzy threshold evaluation
+
+| Metric / decision threshold | TP | FP | TN | FN | Recall | F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| ssdeep similarity >= 10 (all tested thresholds 10-100 tie) | 1 | 0 | 1 | 21 | 0.045 | 0.087 |
+| TLSH distance <= 200 | 7 | 0 | 1 | 15 | 0.318 | 0.483 |
+| TLSH distance <= 300 | 17 | 0 | 1 | 5 | 0.773 | 0.872 |
+
+No useful ssdeep threshold was found because all re-encoded variants scored zero. TLSH at 300 is the best tested fuzzy threshold by F1, but it is rejected as a recommended visual-matching threshold: the unrelated trip's distance (320) is too close to transformed positives, and several valid transformations are farther away (up to 453). With only one negative, a small threshold increase could turn the only true negative into a false positive.
 
 ## Network recovery
 
